@@ -16,7 +16,8 @@ enum Palette {
     // 底色与卡片
     static let pageBg      = Color(hex: 0xF3F7FF)
     static let white       = Color.white
-    static let systemBar   = Color(hex: 0xF9F9F9)   // 底部系统条（真机最底下那条色差）
+    static let systemBar   = Color(hex: 0xF9F9F9)
+    static let hairlineColor = Color(hex: 0xE7E7E7)   // 底部 tab 栏下沿那条细线   // 底部系统条（真机最底下那条色差）
     static let cardBg      = Color.white
 
     // 文字
@@ -149,7 +150,7 @@ enum Metrics {
     static let revokeMinWidth: CGFloat   = 118
 
     static let tabBarRow: CGFloat        = 52
-    static let bottomBand: CGFloat       = 34    // 底部 #F9F9F9 色带（= 安全区）    // 底部 tab 行高
+    static let bottomBand: CGFloat       = 35    // 底部 #F9F9F9 色带（真机 34.8dp）
     static let tabIcon: CGFloat          = 24
     static let tabIconRecord: CGFloat    = 22
     static let tabTextTop: CGFloat       = 2

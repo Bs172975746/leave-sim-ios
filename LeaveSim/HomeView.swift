@@ -33,9 +33,14 @@ struct HomeView: View {
                        onApply: { },
                        onRecord: { path.append(.records) })
 
-            // 真机最底部那条 #F9F9F9 色带（高度 = 底部安全区）
-            Palette.systemBar
-                .frame(height: Metrics.bottomBand)
+            // 真机最底部：先一条 0.5pt 分隔线，下面才是 #F9F9F9 色带
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(Palette.hairlineColor)
+                    .frame(height: 0.5)
+                Palette.systemBar
+                    .frame(height: Metrics.bottomBand)
+            }
         }
         .ignoresSafeArea(edges: .bottom)
         .background(Palette.pageBg)
