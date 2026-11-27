@@ -497,12 +497,15 @@ struct CaptureRecords: View {
             }
             .frame(height: 40)
             .background(Palette.white)
-            ScrollView(showsIndicators: false) {
-                RecordsBody(store: store, interactive: false)
-            }
+            RecordsBody(store: store, interactive: false)
+            Spacer(minLength: 0)
             HomeTabBar(store: store, selected: .records, interactive: false)
+            VStack(spacing: 0) {
+                Rectangle().fill(Palette.hairlineColor).frame(height: 0.5)
+                Palette.systemBar.frame(height: Metrics.bottomBand)
+            }
         }
         .background(Palette.pageBg)
-        .frame(width: Metrics.captureWidth)
+        .frame(width: Metrics.captureWidth, height: Metrics.captureHeight)
     }
 }

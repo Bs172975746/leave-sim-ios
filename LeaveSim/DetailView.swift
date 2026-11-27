@@ -390,14 +390,14 @@ struct CaptureDetail: View {
         VStack(spacing: 0) {
             NavHeader(store: store, titleKey: "nav.detail", showsBack: true)
             DetailTabStrip(store: store, selected: .constant(tab), interactive: false)
-            ScrollView(showsIndicators: false) {
-                DetailContent(store: store,
-                              tab: tab,
-                              approvalOpen: .constant(approvalOpen),
-                              interactive: false)
-            }
+            DetailContent(store: store,
+                          tab: tab,
+                          approvalOpen: .constant(approvalOpen),
+                          interactive: false)
+            Spacer(minLength: 0)
             DetailBottomBar(store: store, interactive: false)
         }
+        .frame(height: Metrics.captureHeight)
         .background(Palette.pageBg)
         .frame(width: Metrics.captureWidth)
     }

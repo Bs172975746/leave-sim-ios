@@ -13,8 +13,9 @@ import UIKit
 enum Shot {
     /// 把任意视图按 393pt 宽渲染成 3 倍图。
     static func render<V: View>(_ content: V, width: CGFloat = Metrics.captureWidth) -> UIImage? {
-        let renderer = ImageRenderer(content: content.frame(width: width))
-        renderer.scale = 3
+        let renderer = ImageRenderer(content: content.frame(width: width,
+                                                            height: Metrics.captureHeight))
+        renderer.scale = Metrics.captureScale
         renderer.isOpaque = true
         return renderer.uiImage
     }
