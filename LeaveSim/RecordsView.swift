@@ -41,8 +41,13 @@ struct RecordsView: View {
                            interactive: true,
                            onApply: { path.removeAll() },
                            onRecord: {})
+
+                // 真机最底部那条 #F9F9F9 色带
+                Palette.systemBar
+                    .frame(height: Metrics.bottomBand)
             }
             .background(Palette.pageBg)
+            .ignoresSafeArea(edges: .bottom)
 
             if showFilter {
                 FilterPanel(store: store,

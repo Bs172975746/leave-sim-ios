@@ -148,7 +148,8 @@ enum Metrics {
     static let revokeHeight: CGFloat     = 32
     static let revokeMinWidth: CGFloat   = 118
 
-    static let tabBarRow: CGFloat        = 52    // 底部 tab 行高
+    static let tabBarRow: CGFloat        = 52
+    static let bottomBand: CGFloat       = 34    // 底部 #F9F9F9 色带（= 安全区）    // 底部 tab 行高
     static let tabIcon: CGFloat          = 24
     static let tabIconRecord: CGFloat    = 22
     static let tabTextTop: CGFloat       = 2

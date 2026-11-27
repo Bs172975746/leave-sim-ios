@@ -16,29 +16,28 @@ struct HomeView: View {
     @State private var confirmRevoke = false
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // 底部安全区那条“色差”：真机是 #F9F9F9，不是纯白
-            Palette.systemBar.ignoresSafeArea(edges: .bottom)
+        VStack(spacing: 0) {
+            nav
 
-            VStack(spacing: 0) {
-                nav
-
-                ScrollView(showsIndicators: false) {
-                    HomeBody(store: store,
-                             interactive: true,
-                             onOpenDetail: { path.append(.detail) },
-                             onStart: { start($0) },
-                             onRevoke: { confirmRevoke = true })
-                }
-
-                HomeTabBar(store: store,
-                           selected: .apply,
-                           interactive: true,
-                           onApply: { },
-                           onRecord: { path.append(.records) })
+            ScrollView(showsIndicators: false) {
+                HomeBody(store: store,
+                         interactive: true,
+                         onOpenDetail: { path.append(.detail) },
+                         onStart: { start($0) },
+                         onRevoke: { confirmRevoke = true })
             }
-        }
 
+            HomeTabBar(store: store,
+                       selected: .apply,
+                       interactive: true,
+                       onApply: { },
+                       onRecord: { path.append(.records) })
+
+            // 真机最底部那条 #F9F9F9 色带（高度 = 底部安全区）
+            Palette.systemBar
+                .frame(height: Metrics.bottomBand)
+        }
+        .ignoresSafeArea(edges: .bottom)
         .background(Palette.pageBg)
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
@@ -266,7 +265,6 @@ struct HomeTabBar: View {
             .frame(height: Metrics.tabBarRow)
         }
         .background(Palette.white)
-        .background(Palette.systemBar.ignoresSafeArea(edges: .bottom))
     }
 
     private func item(tab: HomeTab,
