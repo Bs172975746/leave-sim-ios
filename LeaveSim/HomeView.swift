@@ -164,8 +164,9 @@ struct HomeBody: View {
 
     /// 安卓卡里是单行整句「开始时间：2026-11-16 08:40」。
     private func infoLine(labelKey: String, valueKey: String) -> some View {
+        // 原版列表卡里「开始时间：xxx」整行都是浅灰，值是 #919191、标签 #999999
         (Text(store[labelKey] + "：").foregroundColor(Palette.textLabel)
-            + Text(store[valueKey]).foregroundColor(Palette.textValue))
+            + Text(store[valueKey]).foregroundColor(Palette.listValue))
             .font(Typo.row)
             .lineSpacing(2)
             .frame(maxWidth: .infinity, alignment: .leading)

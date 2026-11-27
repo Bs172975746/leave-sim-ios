@@ -24,6 +24,7 @@ enum Palette {
     static let navTitle    = Color(hex: 0x000000)   // 导航标题：纯黑
     static let textPrimary = Color(hex: 0x24262A)   // text_primary
     static let textValue   = Color(hex: 0x33363B)   // text_value
+    static let listValue   = Color(hex: 0x919191)   // 列表卡里「开始时间：xxx」的值（原版取样）
     static let textLabel   = Color(hex: 0x999999)   // text_label
     static let textTabIdle = Color(hex: 0x82868C)   // text_tab_idle
     static let textHint    = Color(hex: 0x9AA0A6)   // text_hint
