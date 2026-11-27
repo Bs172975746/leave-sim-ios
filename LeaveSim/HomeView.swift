@@ -16,23 +16,29 @@ struct HomeView: View {
     @State private var confirmRevoke = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            NavHeader(store: store, titleKey: "nav.home", showsBack: true)
+        ZStack(alignment: .bottom) {
+            // 底部安全区那条“色差”：安卓是页面底色，不是纯白
+            Palette.pageBg.ignoresSafeArea(edges: .bottom)
 
-            ScrollView(showsIndicators: false) {
-                HomeBody(store: store,
-                         interactive: true,
-                         onOpenDetail: { path.append(.detail) },
-                         onStart: { start($0) },
-                         onRevoke: { confirmRevoke = true })
+            VStack(spacing: 0) {
+                nav
+
+                ScrollView(showsIndicators: false) {
+                    HomeBody(store: store,
+                             interactive: true,
+                             onOpenDetail: { path.append(.detail) },
+                             onStart: { start($0) },
+                             onRevoke: { confirmRevoke = true })
+                }
+
+                HomeTabBar(store: store,
+                           selected: .apply,
+                           interactive: true,
+                           onApply: { },
+                           onRecord: { path.append(.records) })
             }
-
-            HomeTabBar(store: store,
-                       selected: .apply,
-                       interactive: true,
-                       onApply: { },
-                       onRecord: { path.append(.records) })
         }
+
         .background(Palette.pageBg)
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
@@ -46,6 +52,10 @@ struct HomeView: View {
             }
             Button("取消", role: .cancel) { }
         }
+    }
+
+    private var nav: some View {
+        NavHeader(store: store, titleKey: "nav.home", showsBack: true)
     }
 
     // 点发起卡：先记下假别，再过承诺书
