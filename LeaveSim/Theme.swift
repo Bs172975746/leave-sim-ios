@@ -88,7 +88,7 @@ enum Typo {
     static let homeTitle     = Font.system(size: 15, weight: .bold)      // 列表卡标题
     static let recordTitle   = Font.system(size: 15, weight: .bold)      // 记录卡标题
     static let typeLabel     = Font.system(size: 15, weight: .bold)      // 发起卡标签
-    static let avatarName    = Font.system(size: 15, weight: .bold)      // 卡内申请人
+    static let avatarName    = Font.system(size: 15, weight: .regular)   // 卡内申请人（原版是细体）
     static let recordName    = Font.system(size: 14)                     // 记录卡申请人
     static let detailStatus  = Font.system(size: 15)                     // 详情页状态
     static let status        = Font.system(size: 13)                     // 列表 / 记录卡状态
