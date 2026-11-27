@@ -504,7 +504,13 @@ struct AvatarBadge: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                PersonGlyph(color: .white, size: glyphSize)
+                // 原版卡内小头像用的是「人形 + 加号」图标（ic_join），不是纯人形
+                Image(Art.join)
+                    .resizable()
+                    .renderingMode(.template)
+                    .foregroundStyle(Color.white)
+                    .scaledToFit()
+                    .frame(width: glyphSize + 4, height: glyphSize + 4)
             }
         }
         .frame(width: size, height: size)
