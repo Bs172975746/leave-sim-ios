@@ -1,0 +1,63 @@
+name: build-ios
+
+# 没有 Mac 也能出 .ipa：把 leave-ios 推到 GitHub，在 Actions 里手动跑这个流程。
+# 免费额度：私有仓库每月 2000 分钟（macOS runner 按 10 倍计），编译一次约 4~6 分钟 = 40~60 分钟额度。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 显示 Xcode 版本
+        run: xcodebuild -version
+
+      - name: 试探现有 xcodeproj 是否可用
+        id: probe
+        run: |
+          set +e
+          xcodebuild -project LeaveSim.xcodeproj -list > /dev/null 2>&1
+          code=$?
+          set -e
+          echo "existing project exit code = $code"
+          echo "ok=$code" >> "$GITHUB_OUTPUT"
+
+      - name: 工程损坏则用 XcodeGen 重新生成
+        if: steps.probe.outputs.ok != '0'
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -project LeaveSim.xcodeproj -list
+
+      - name: 编译（不签名）
+        run: |
+          xcodebuild \
+            -project LeaveSim.xcodeproj \
+            -scheme LeaveSim \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: 打包成 ipa
+        run: |
+          mkdir -p Payload
+          cp -R "build/Build/Products/Release-iphoneos/LeaveSim.app" Payload/
+          zip -qry LeaveSim-unsigned.ipa Payload
+          ls -lh LeaveSim-unsigned.ipa
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: LeaveSim-unsigned-ipa
+          path: LeaveSim-unsigned.ipa
+          retention-days: 30
