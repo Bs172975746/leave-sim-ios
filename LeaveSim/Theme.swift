@@ -130,9 +130,9 @@ enum Metrics {
     static let ruleRadius: CGFloat       = 4     // bg_rules 右侧圆角
     static let sheetRadius: CGFloat      = 18    // bg_sheet
 
-    static let homeSectionTop: CGFloat   = 8.2    // 「进行中」
-    static let homeCardTop: CGFloat      = 18.2    // 进行中卡
-    static let homeSection2Top: CGFloat  = 23.8    // 「发起」
+    static let homeSectionTop: CGFloat   = 9.5    // 「进行中」
+    static let homeCardTop: CGFloat      = 19.2    // 进行中卡
+    static let homeSection2Top: CGFloat  = 17.8    // 「发起」
     static let homeTypeFirstTop: CGFloat = 25    // 第一张发起卡
     static let homeTypeGap: CGFloat      = 15    // 发起卡之间
     static let homeTypeHeight: CGFloat   = 64    // 发起卡高度
@@ -505,13 +505,12 @@ struct AvatarBadge: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                // 原版卡内小头像用的是「人形 + 加号」图标（ic_join），不是纯人形
+                // 原版卡内小头像就是 ic_join 这张图（蓝圆 + 白人形加号），直接铺满圆形
                 Image(Art.join)
                     .resizable()
-                    .renderingMode(.template)
-                    .foregroundStyle(Color.white)
-                    .scaledToFit()
-                    .frame(width: glyphSize + 4, height: glyphSize + 4)
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
             }
         }
         .frame(width: size, height: size)
