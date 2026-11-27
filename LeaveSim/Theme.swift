@@ -129,18 +129,18 @@ enum Metrics {
     static let ruleRadius: CGFloat       = 4     // bg_rules 右侧圆角
     static let sheetRadius: CGFloat      = 18    // bg_sheet
 
-    static let homeSectionTop: CGFloat   = 5.4    // 「进行中」
+    static let homeSectionTop: CGFloat   = 8.2    // 「进行中」
     static let homeCardTop: CGFloat      = 23.3    // 进行中卡
-    static let homeSection2Top: CGFloat  = 24.6    // 「发起」
+    static let homeSection2Top: CGFloat  = 20.4    // 「发起」
     static let homeTypeFirstTop: CGFloat = 25    // 第一张发起卡
     static let homeTypeGap: CGFloat      = 15    // 发起卡之间
     static let homeTypeHeight: CGFloat   = 64    // 发起卡高度
     static let homeTypeIcon: CGFloat     = 44    // ic_join
-    static let homeInfoTop: CGFloat      = 12
+    static let homeInfoTop: CGFloat      = 11.1
     static let homeInfoPad: CGFloat      = 4.0     // 每行信息上下 padding
-    static let homeFootTop: CGFloat      = 34.6
-    static let homeCardPadTop: CGFloat   = 20
-    static let homeCardPadBottom: CGFloat = 6
+    static let homeFootTop: CGFloat      = 25
+    static let homeCardPadTop: CGFloat   = 17.8
+    static let homeCardPadBottom: CGFloat = 11
     static let homeWhoTop: CGFloat       = 16
     static let homeMoreTop: CGFloat      = 11
     static let avatarSmall: CGFloat      = 26    // 卡内头像
