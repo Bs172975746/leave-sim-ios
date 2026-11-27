@@ -2,72 +2,55 @@
 //  FormView.swift
 //  LeaveSim
 //
-//  请假申请表单页（导航标题「请假」）。所有文字照旧可点即改；
-//  带 * 的是必填项，点行右侧的 chevron 打开日期 / 时间 / 是·否 选择。
+//  ④请假申请表：请假内容 / 请假去向 / 抄送人 + 提交。
+//  行距 46pt、标签列 108pt、必填项红星、缺项时红字提示在值下方。
+//  提交时把 f.* 写回 q.* / d.*，再回列表 —— 列表的「进行中」卡片立刻变。
 //
 
 import SwiftUI
 import PhotosUI
 
-enum FormField: Hashable {
-    case start
-    case end
-}
-
-struct WheelState: Identifiable {
-    let id = UUID()
-    var field: FormField
-    var isDate: Bool
-}
+// MARK: - 表单页
 
 struct FormView: View {
     @EnvironmentObject private var store: TextStore
     @Environment(\.dismiss) private var dismiss
     @Binding var path: [AppRoute]
 
-    @State private var proofItem: PhotosPickerItem?
-    @State private var proofPickerShown = false
-    @State private var pickLeftShown = false
     @State private var wheel: WheelState?
-
-    @State private var dateIndexes: [Int] = [2, 8, 22]
-    @State private var timeIndexes: [Int] = [7, 1]
-    @State private var stagingDate = "2026-09-23"
+    @State private var dateIndexes: [Int] = [2, 10, 29]
+    @State private var timeIndexes: [Int] = [8, 0]
+    @State private var reasonDraft: String = ""
+    @State private var selectedCC: Set<Int> = []
+    @State private var showPicker = false
+    @State private var pickerItem: PhotosPickerItem?
 
     @StateObject private var exporter = ShotExporter()
 
-    init(path: Binding<[AppRoute]>) {
-        _path = path
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
-            NavHeader(titleKey: "nav.form",
-                      title: store["nav.form"],
-                      showsBack: true,
-                      onBack: { dismiss() },
-                      trailingIcons: ["camera"],
-                      onTrailingTap: { _ in exporter.asking = true })
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                NavHeader(titleKey: "nav.form",
+                          title: store["nav.form"],
+                          showsBack: true,
+                          onBack: { dismiss() },
+                          trailing: [.symbol("camera")],
+                          onTrailingTap: { _ in exporter.asking = true })
 
-            ScrollView(showsIndicators: false) {
-                FormBody(store: store,
-                         interactive: true,
-                         onPickStart: { openDate(.start) },
-                         onPickEnd: { openDate(.end) },
-                         onPickLeft: { pickLeftShown = true },
-                         onPickProof: { proofPickerShown = true },
-                         onRelocate: { exporter.flash("定位已刷新：示例省示例市示例区示例路88号") },
-                         onEditCC: { exporter.flash("点下面的标签就能选中抄送人") })
-                    .padding(.bottom, 12)
-            }
+                ScrollView(showsIndicators: false) {
+                    FormBody(store: store,
+                             interactive: true,
+                             reasonDraft: $reasonDraft,
+                             selectedCC: $selectedCC,
+                             onStartTap: { openWheel(.start) },
+                             onEndTap: { openWheel(.end) },
+                             onProofTap: { showPicker = true })
+                }
 
-            FormSubmitBar(store: store, interactive: true) {
-                path.append(.promise)
+                FormSubmitBar(store: store, interactive: true, onSubmit: submit)
             }
-        }
-        .background(Palette.pageBg)
-        .toolbar(.hidden, for: .navigationBar)
-        .overlay {
+            .background(Palette.pageBg)
+
             if let wheel {
                 WheelPanel(state: wheel,
                            dateIndexes: $dateIndexes,
@@ -75,462 +58,419 @@ struct FormView: View {
                            onCancel: { self.wheel = nil },
                            onNext: {
                                if wheel.isDate {
-                                   stagingDate = dateString()
                                    self.wheel = WheelState(field: wheel.field, isDate: false)
                                } else {
-                                   let text = stagingDate + " " + timeString()
-                                   store.set(wheel.field == .start ? "f.start" : "f.end", text)
+                                   commitWheel(wheel.field)
                                    self.wheel = nil
                                }
                            })
+                    .zIndex(5)
             }
         }
-        .photosPicker(isPresented: $proofPickerShown, selection: $proofItem, matching: .images)
-        .onChange(of: proofItem) { item in
-            guard item != nil else { return }
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
+        .onAppear {
+            reasonDraft = store.isFilled("f.reason") ? store["f.reason"] : ""
+        }
+        .onChange(of: reasonDraft) { text in
+            store.set("f.reason", text)
+        }
+        .photosPicker(isPresented: $showPicker, selection: $pickerItem, matching: .images)
+        .onChange(of: pickerItem) { item in
             Task {
                 await store.loadImage(item, slot: .proof)
-                proofItem = nil
+                if store.proof != nil { store.set("f.proof", "已选择 1 张证明材料") }
+                pickerItem = nil
             }
         }
-        .confirmationDialog("是否离校", isPresented: $pickLeftShown, titleVisibility: .visible) {
-            Button("是") { store.set("f.left", "是") }
-            Button("否") { store.set("f.left", "否") }
-            Button("取消", role: .cancel) {}
-        }
-        .shotExport(exporter, capture: { Shot.render(CaptureForm(store: store)) })
+        .shotExport(exporter, capture: {
+            Shot.render(CaptureForm(store: store))
+        })
     }
 
-    private func openDate(_ field: FormField) {
-        stagingDate = dateString()
+    // MARK: 滚轮
+
+    private func openWheel(_ field: FormField) {
+        let key = field == .start ? "f.start" : "f.end"
+        if let date = TimeFmt.parse(store[key]) {
+            let cal = Calendar.current
+            let c = cal.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+            let yearText = String(format: "%04d", c.year ?? 2026)
+            let yi = WheelData.years.firstIndex(of: yearText) ?? 2
+            dateIndexes = [yi,
+                           min(max((c.month ?? 1) - 1, 0), WheelData.months.count - 1),
+                           min(max((c.day ?? 1) - 1, 0), WheelData.days.count - 1)]
+            timeIndexes = [min(max(c.hour ?? 8, 0), 23), min(max(c.minute ?? 0, 0), 59)]
+        }
         wheel = WheelState(field: field, isDate: true)
     }
 
-    private func dateString() -> String {
-        let years = WheelData.years
-        let months = WheelData.months
-        let days = WheelData.days
-        let y = years[min(max(dateIndexes[0], 0), years.count - 1)]
-        let m = months[min(max(dateIndexes[1], 0), months.count - 1)]
-        let d = days[min(max(dateIndexes[2], 0), days.count - 1)]
-        return "\(y)-\(m)-\(d)"
+    private func commitWheel(_ field: FormField) {
+        let year = WheelData.years[min(dateIndexes[0], WheelData.years.count - 1)]
+        let month = WheelData.months[min(dateIndexes[1], WheelData.months.count - 1)]
+        let day = WheelData.days[min(dateIndexes[2], WheelData.days.count - 1)]
+        let hour = WheelData.hours[min(timeIndexes[0], WheelData.hours.count - 1)]
+        let minute = WheelData.minutes[min(timeIndexes[1], WheelData.minutes.count - 1)]
+        let text = "\(year)-\(month)-\(day) \(hour):\(minute)"
+        store.set(field == .start ? "f.start" : "f.end", text)
+        // 起止都齐了就立刻把时长补上，让表单里看得见
+        store.set("f.dur", store["f.dur"])
     }
 
-    private func timeString() -> String {
-        let h = WheelData.hours[min(max(timeIndexes[0], 0), WheelData.hours.count - 1)]
-        let m = WheelData.minutes[min(max(timeIndexes[1], 0), WheelData.minutes.count - 1)]
-        return "\(h):\(m)"
+    // MARK: 提交
+
+    private func submit() {
+        let missing = store.validateForm()
+        guard missing == 0 else {
+            exporter.flash("还有 \(missing) 项必填没填")
+            return
+        }
+        store.commitForm()
+        path.removeAll()
     }
 }
 
-// MARK: - 表单正文
+// MARK: - 表单主体
 
 struct FormBody: View {
     @ObservedObject var store: TextStore
     var interactive: Bool = true
-    var onPickStart: () -> Void = {}
-    var onPickEnd: () -> Void = {}
-    var onPickLeft: () -> Void = {}
-    var onPickProof: () -> Void = {}
-    var onRelocate: () -> Void = {}
-    var onEditCC: () -> Void = {}
-
-    @Environment(\.editorCenter) private var editor
-    @State private var selectedCC: Set<String> = []
-
-    private let red = Color(hex: 0xFF3B30)
+    @Binding var reasonDraft: String
+    @Binding var selectedCC: Set<Int>
+    var onStartTap: () -> Void = {}
+    var onEndTap: () -> Void = {}
+    var onProofTap: () -> Void = {}
 
     var body: some View {
         VStack(spacing: Metrics.cardSpacing) {
-            headerCard
+            titleCard
             infoCard
             destCard
             ccCard
         }
+        .padding(.horizontal, Metrics.cardMargin)
+        .padding(.top, 13)
+        .padding(.bottom, 22)
     }
 
-    // MARK: 头卡
-
-    private var headerCard: some View {
-        HStack(spacing: 0) {
-            RuleStrip(text: store["hd.rule"])
-                .overlay(
-                    Rectangle()
-                        .fill(Color.clear)
-                        .contentShape(Rectangle())
-                        .editTap("hd.rule", store["hd.rule"], enabled: interactive)
-                )
-
-            EditableText(text: store["f.hd.title"],
-                         font: .system(size: 17, weight: .semibold),
-                         color: Palette.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .editTap("f.hd.title", store["f.hd.title"], enabled: interactive)
-                .padding(.leading, 20)
-                .padding(.trailing, 22)
-                .padding(.vertical, 21)
+    private var titleCard: some View {
+        Card(padding: 18) {
+            HStack(spacing: 10) {
+                EditableText(text: store["f.hd.title"],
+                             font: Typo.cardTitle,
+                             color: Palette.textPrimary)
+                    .editTap("f.hd.title", store["f.hd.title"], enabled: interactive)
+                Spacer(minLength: 0)
+                EditableText(text: store["hd.status"],
+                             font: .system(size: 12, weight: .medium),
+                             color: store.statusColor(for: "hd.status"))
+                    .editTap("hd.status", store["hd.status"], enabled: interactive)
+                ArtImage(name: Art.join, width: 26, height: 26)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.white)
     }
-
-    // MARK: 请假内容
 
     private var infoCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 0) {
-                sectionTitle("sec.info")
+                EditableText(text: store["sec.f.info"], font: Typo.sectionTitle, color: Palette.textPrimary)
+                    .editTap("sec.f.info", store["sec.f.info"], enabled: interactive)
+                    .padding(.bottom, 6)
 
-                // * 开始时间
-                row(labelKey: "l.f.start", required: true) {
-                    pickerValue(key: "f.start", action: onPickStart)
-                }
-                // * 结束时间
-                row(labelKey: "l.f.end", required: true) {
-                    pickerValue(key: "f.end", action: onPickEnd)
-                }
-                // * 请假时长 天 / 时 / 分
-                row(labelKey: "l.f.dur", required: true) {
-                    HStack(spacing: 4) {
-                        unitValue("f.dur.d")
-                        unitText("f.unit.d")
-                        unitValue("f.dur.h")
-                        unitText("f.unit.h")
-                        unitValue("f.dur.m")
-                        unitText("f.unit.m")
-                        Spacer(minLength: 0)
-                    }
-                }
-                // * 影响课程
-                row(labelKey: "l.f.course", required: true) {
-                    EditableText(text: store["f.course"], font: Typo.value, color: Palette.textValue)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .editTap("f.course", store["f.course"], enabled: interactive)
-                }
-                // * 请假原因
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .top, spacing: 0) {
-                        label("l.f.reason", required: true)
-                        VStack(alignment: .trailing, spacing: 4) {
-                            reasonEditor
-                            Text("\(store["f.reason"].count)/1000")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Palette.textLabel)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding(.vertical, 8)
+                FormRow(store: store, labelKey: "l.f.start", valueKey: "f.start",
+                        required: true, interactive: interactive, hint: true,
+                        onValueTap: onStartTap)
+                FormRow(store: store, labelKey: "l.f.end", valueKey: "f.end",
+                        required: true, interactive: interactive, hint: true,
+                        onValueTap: onEndTap)
+                FormRow(store: store, labelKey: "l.f.dur", valueKey: "f.dur",
+                        interactive: interactive, valueColor: Palette.blue)
 
-                // 证明材料
-                HStack(alignment: .top, spacing: 0) {
-                    label("l.f.proof", required: false)
-                    VStack(alignment: .leading, spacing: 6) {
-                        proofBox
-                        EditableText(text: store["f.proof.hint"],
-                                     font: .system(size: 12),
-                                     color: Palette.textLabel)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .editTap("f.proof.hint", store["f.proof.hint"], enabled: interactive)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.vertical, 8)
+                FormRow(store: store, labelKey: "l.f.course", valueKey: "f.course",
+                        required: true, interactive: interactive, hint: true)
 
-                // * 发起位置
-                row(labelKey: "l.f.place", required: true) {
-                    HStack(spacing: 8) {
-                        EditableText(text: store["f.place"],
-                                     font: Typo.value,
-                                     color: Palette.textValue,
-                                     lineSpacing: 2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .editTap("f.place", store["f.place"], enabled: interactive)
+                reasonRow
 
-                        EditableText(text: store["f.relocate"],
-                                     font: .system(size: 13),
-                                     color: Palette.blue)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                guard interactive else { return }
-                                onRelocate()
-                            }
-                            .onLongPressGesture(minimumDuration: 0.5) {
-                                guard interactive else { return }
-                                editor.begin(key: "f.relocate", value: store["f.relocate"])
-                            }
-                    }
-                }
+                proofRow
+
+                FormRow(store: store, labelKey: "l.f.place", valueKey: "f.place",
+                        required: true, interactive: interactive, hint: true)
             }
         }
-        .padding(.horizontal, Metrics.cardMargin)
-        .padding(.top, Metrics.cardSpacing)
     }
 
-    private var reasonEditor: some View {
-        let text = store["f.reason"]
-        return Text(text.isEmpty ? store["f.reason.ph"] : text)
-            .font(Typo.value)
-            .foregroundStyle(text.isEmpty ? Palette.textLabel : Palette.textValue)
-            .lineSpacing(2)
-            .frame(maxWidth: .infinity, minHeight: 62, alignment: .topLeading)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(10)
-            .background(Palette.fieldBg)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .contentShape(Rectangle())
-            .editTap("f.reason", text, enabled: interactive)
-    }
+    // 多行原因：直接编辑，右上角 0/1000
+    private var reasonRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 3) {
+                EditableText(text: store["l.f.reason"], font: Typo.label, color: Palette.textLabel)
+                    .editTap("l.f.reason", store["l.f.reason"], enabled: interactive)
+                Text("*").font(.system(size: 13)).foregroundStyle(Palette.error)
+                Spacer(minLength: 0)
+                Text("\(reasonDraft.count)/1000")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.textLabel)
+            }
 
-    private var proofBox: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Palette.ghostBorder, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-
-            if let proof = store.proof {
-                Image(uiImage: proof)
-                    .resizable()
-                    .scaledToFill()
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            } else {
-                HStack(spacing: 8) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .medium))
+            ZStack(alignment: .topLeading) {
+                if reasonDraft.isEmpty {
+                    Text(store["f.reason"])
+                        .font(Typo.value)
                         .foregroundStyle(Palette.textLabel)
-                    EditableText(text: store["f.proof.count"],
-                                 font: .system(size: 12),
-                                 color: Palette.textLabel)
-                        .editTap("f.proof.count", store["f.proof.count"], enabled: interactive)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 9)
+                        .allowsHitTesting(false)
                 }
+                TextField("", text: $reasonDraft, axis: .vertical)
+                    .font(Typo.value)
+                    .foregroundStyle(Palette.textValue)
+                    .lineLimit(3...8)
+                    .padding(9)
+                    .disabled(!interactive)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.fieldBg)
+            .clipShape(RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous))
+
+            if !store[store.requiredHint("f.reason")].isEmpty {
+                Text(store[store.requiredHint("f.reason")])
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.error)
             }
         }
-        .frame(height: 92)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard interactive else { return }
-            onPickProof()
-        }
+        .padding(.vertical, 8)
     }
 
-    // MARK: 请假去向
+    // 证明材料：虚线框，点一下选图
+    private var proofRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 0) {
+                EditableText(text: store["l.f.proof"], font: Typo.label, color: Palette.textLabel)
+                    .editTap("l.f.proof", store["l.f.proof"], enabled: interactive)
+                    .frame(width: Metrics.formLabelWidth, alignment: .leading)
+
+                HStack(spacing: 10) {
+                    if let proof = store.proof {
+                        Image(uiImage: proof)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 44, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    EditableText(text: store["f.proof"], font: Typo.value, color: Palette.textLabel)
+                        .editTap("f.proof", store["f.proof"], enabled: interactive)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(minHeight: Metrics.formRowPitch)
+
+            Button {
+                if interactive { onProofTap() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .medium))
+                    Text("上传证明材料")
+                        .font(.system(size: 12))
+                }
+                .foregroundStyle(Palette.blue)
+                .frame(maxWidth: .infinity)
+                .frame(height: 40)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        .foregroundStyle(Palette.ghostBorder)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 6)
+    }
 
     private var destCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 0) {
-                sectionTitle("sec.dest")
-                row(labelKey: "l.f.left", required: true) {
-                    pickerValue(key: "f.left", action: onPickLeft)
+                EditableText(text: store["sec.f.dest"], font: Typo.sectionTitle, color: Palette.textPrimary)
+                    .editTap("sec.f.dest", store["sec.f.dest"], enabled: interactive)
+                    .padding(.bottom, 6)
+
+                InfoRow(store: store,
+                        labelKey: "l.f.left",
+                        valueKey: "f.left",
+                        interactive: interactive,
+                        valueColor: Palette.blue,
+                        valueAction: {
+                            store.set("f.left", store["f.left"].hasPrefix("否") ? "是" : "否")
+                        })
+
+                if !store["f.left"].hasPrefix("否") {
+                    FormRow(store: store, labelKey: "l.f.dest", valueKey: "f.dest", interactive: interactive)
+                    FormRow(store: store, labelKey: "l.f.addr", valueKey: "f.addr", interactive: interactive)
+                    FormRow(store: store, labelKey: "l.f.emerg", valueKey: "f.emerg", interactive: interactive)
+                    FormRow(store: store, labelKey: "l.f.tel", valueKey: "f.tel", interactive: interactive)
                 }
             }
         }
-        .padding(.horizontal, Metrics.cardMargin)
     }
-
-    // MARK: 抄送人
 
     private var ccCard: some View {
         Card {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    sectionTitle("sec.cc")
-                    Spacer(minLength: 0)
-                    EditableText(text: store["f.cc.edit"], font: .system(size: 13), color: Palette.blue)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard interactive else { return }
-                            onEditCC()
-                        }
-                        .onLongPressGesture(minimumDuration: 0.5) {
-                            guard interactive else { return }
-                            editor.begin(key: "f.cc.edit", value: store["f.cc.edit"])
-                        }
-                }
-
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Palette.ghostBorder, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-                    .frame(height: 44)
-                    .overlay(
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(Palette.textLabel)
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        guard interactive else { return }
-                        onEditCC()
-                    }
-
-                EditableText(text: store["f.cc.title"],
-                             font: .system(size: 13),
-                             color: Palette.textValue)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .editTap("f.cc.title", store["f.cc.title"], enabled: interactive)
-
-                EditableText(text: store["f.cc.empty"],
-                             font: .system(size: 13),
-                             color: Palette.textLabel,
-                             alignment: .center)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .editTap("f.cc.empty", store["f.cc.empty"], enabled: interactive)
-                    .padding(.vertical, 2)
+            VStack(alignment: .leading, spacing: 0) {
+                EditableText(text: store["sec.cc"], font: Typo.sectionTitle, color: Palette.textPrimary)
+                    .editTap("sec.cc", store["sec.cc"], enabled: interactive)
+                    .padding(.bottom, 10)
 
                 HStack(spacing: 10) {
-                    chip("f.cc.a")
-                    chip("f.cc.b")
-                    chip("f.cc.c")
+                    ForEach(1...3, id: \.self) { index in
+                        ccChip(index)
+                    }
                     Spacer(minLength: 0)
                 }
+
+                Text(store["f.cc.add"])
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.blue)
+                    .padding(.top, 12)
+                    .editTap("f.cc.add", store["f.cc.add"], enabled: interactive)
             }
         }
-        .padding(.horizontal, Metrics.cardMargin)
     }
 
-    private func chip(_ key: String) -> some View {
-        let on = selectedCC.contains(key)
-        return EditableText(text: store[key],
-                            font: .system(size: 13),
-                            color: on ? Palette.blue : Palette.textValue)
+    private func ccChip(_ index: Int) -> some View {
+        let key = "f.cc.\(index)"
+        let on = selectedCC.contains(index)
+        return Text(store[key])
+            .font(.system(size: 12))
+            .foregroundStyle(on ? Palette.blue : Palette.textLabel)
+            .lineLimit(1)
             .padding(.horizontal, 12)
-            .frame(height: 30)
-            .background(on ? Palette.ruleBg : Palette.white)
-            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .padding(.vertical, 7)
+            .background(on ? Palette.blueSoft : Palette.fieldBg)
+            .clipShape(Capsule())
             .overlay(
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .stroke(on ? Palette.blue : Palette.ghostBorder, lineWidth: 1)
+                Capsule().stroke(on ? Palette.blue.opacity(0.4) : Color.clear, lineWidth: 0.8)
             )
-            .contentShape(Rectangle())
+            .contentShape(Capsule())
             .onTapGesture {
                 guard interactive else { return }
-                if on {
-                    selectedCC.remove(key)
-                } else {
-                    selectedCC.insert(key)
-                }
+                if on { selectedCC.remove(index) } else { selectedCC.insert(index) }
             }
-            .onLongPressGesture(minimumDuration: 0.5) {
+            .onLongPressGesture(minimumDuration: 0.45) {
                 guard interactive else { return }
-                editor.begin(key: key, value: store[key])
+                editorBegin(key: key)
             }
     }
 
-    // MARK: 原子
-
-    private func sectionTitle(_ key: String) -> some View {
-        EditableText(text: store[key], font: Typo.sectionTitle, color: Palette.textPrimary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .editTap(key, store[key], enabled: interactive)
-            .padding(.bottom, 5)
-    }
-
-    private func label(_ key: String, required: Bool) -> some View {
-        HStack(alignment: .top, spacing: 2) {
-            Text("*")
-                .font(.system(size: 13))
-                .foregroundStyle(red)
-                .opacity(required ? 1 : 0)
-            EditableText(text: store[key], font: Typo.label, color: Palette.textLabel)
-                .editTap(key, store[key], enabled: interactive)
-        }
-        .frame(width: Metrics.labelWidth, alignment: .leading)
-    }
-
-    private func row<Content: View>(labelKey: String,
-                                    required: Bool,
-                                    @ViewBuilder content: () -> Content) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            label(labelKey, required: required)
-            content()
-        }
-        .frame(minHeight: 22, alignment: .topLeading)
-        .padding(.vertical, 8)
-    }
-
-    private func pickerValue(key: String, action: @escaping () -> Void) -> some View {
-        let empty = store[key] == "请选择"
-        return HStack(spacing: 8) {
-            EditableText(text: store[key],
-                         font: Typo.value,
-                         color: empty ? Palette.textLabel : Palette.textValue)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .editTap(key, store[key], enabled: interactive)
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Palette.textLabel)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard interactive else { return }
-            action()
-        }
-    }
-
-    private func unitValue(_ key: String) -> some View {
-        EditableText(text: store[key], font: Typo.value, color: Palette.textValue, alignment: .center)
-            .frame(width: 34)
-            .padding(.vertical, 3)
-            .background(Palette.fieldBg)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .editTap(key, store[key], enabled: interactive)
-    }
-
-    private func unitText(_ key: String) -> some View {
-        EditableText(text: store[key], font: Typo.value, color: Palette.textLabel)
-            .editTap(key, store[key], enabled: interactive)
+    @Environment(\.editorCenter) private var editor
+    private func editorBegin(key: String) {
+        editor.begin(key: key, value: store[key])
     }
 }
 
-// MARK: - 提交条
+// MARK: - 表单行
+
+struct FormRow: View {
+    @ObservedObject var store: TextStore
+    let labelKey: String
+    let valueKey: String
+    var required: Bool = false
+    var interactive: Bool = true
+    var valueColor: Color? = nil
+    var hint: Bool = false
+    var onValueTap: (() -> Void)? = nil
+
+    @Environment(\.editorCenter) private var editor
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 0) {
+                HStack(spacing: 3) {
+                    EditableText(text: store[labelKey], font: Typo.label, color: Palette.textLabel)
+                        .editTap(labelKey, store[labelKey], enabled: interactive)
+                    if required {
+                        Text("*")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Palette.error)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(width: Metrics.formLabelWidth, alignment: .leading)
+
+                if let onValueTap {
+                    EditableText(text: store[valueKey],
+                                 font: Typo.value,
+                                 color: valueColor ?? Palette.textValue,
+                                 lineSpacing: 2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if interactive { onValueTap() }
+                        }
+                        .onLongPressGesture(minimumDuration: 0.45) {
+                            guard interactive else { return }
+                            editor.begin(key: valueKey, value: store[valueKey])
+                        }
+                } else {
+                    EditableText(text: store[valueKey],
+                                 font: Typo.value,
+                                 color: valueColor ?? Palette.textValue,
+                                 lineSpacing: 2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .editTap(valueKey, store[valueKey], enabled: interactive)
+                }
+            }
+            .frame(minHeight: Metrics.formRowPitch)
+
+            if hint {
+                let tip = store[store.requiredHint(valueKey)]
+                if !tip.isEmpty {
+                    Text(tip)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.error)
+                        .padding(.leading, Metrics.formLabelWidth)
+                        .padding(.bottom, 6)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 底部提交
 
 struct FormSubmitBar: View {
     @ObservedObject var store: TextStore
     var interactive: Bool = true
-    let onSubmit: () -> Void
+    var onSubmit: () -> Void = {}
 
     @Environment(\.editorCenter) private var editor
 
     var body: some View {
         VStack(spacing: 0) {
-            Rectangle()
-                .fill(Palette.divider)
-                .frame(height: 1)
-
-            Group {
-                if interactive {
-                    Button {
-                        onSubmit()
-                    } label: {
-                        buttonLabel
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    buttonLabel
+            Rectangle().fill(Palette.divider).frame(height: 0.5)
+            Text(store["f.submit"])
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .background(Palette.blue)
+                .clipShape(Capsule())
+                .contentShape(Capsule())
+                .padding(.horizontal, Metrics.cardMargin)
+                .padding(.vertical, 12)
+                .onTapGesture {
+                    if interactive { onSubmit() }
                 }
-            }
-            .padding(.horizontal, Metrics.cardMargin)
-            .padding(.top, 10)
-            .padding(.bottom, 12)
+                .onLongPressGesture(minimumDuration: 0.45) {
+                    guard interactive else { return }
+                    editor.begin(key: "f.submit", value: store["f.submit"])
+                }
         }
-        .background(Palette.white.ignoresSafeArea(edges: .bottom))
-    }
-
-    private var buttonLabel: some View {
-        Text(store["f.submit"])
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(Color.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 46)
-            .background(Palette.blue)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .contentShape(Rectangle())
-            .onLongPressGesture(minimumDuration: 0.5) {
-                guard interactive else { return }
-                editor.begin(key: "f.submit", value: store["f.submit"])
-            }
+        .background(Palette.white)
     }
 }
 
-// MARK: - 表单截图
+// MARK: - 截图用静态版
 
 struct CaptureForm: View {
     @ObservedObject var store: TextStore
@@ -538,9 +478,15 @@ struct CaptureForm: View {
     var body: some View {
         VStack(spacing: 0) {
             NavHeader(titleKey: "nav.form", title: store["nav.form"], showsBack: true)
-            FormBody(store: store, interactive: false)
-            FormSubmitBar(store: store, interactive: false, onSubmit: {})
+            ScrollView(showsIndicators: false) {
+                FormBody(store: store,
+                         interactive: false,
+                         reasonDraft: .constant(store.isFilled("f.reason") ? store["f.reason"] : ""),
+                         selectedCC: .constant([]))
+            }
+            FormSubmitBar(store: store, interactive: false)
         }
         .background(Palette.pageBg)
+        .frame(width: Metrics.captureWidth)
     }
 }

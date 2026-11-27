@@ -57,10 +57,13 @@ struct EditTap: ViewModifier {
     func body(content: Content) -> some View {
         content
             .contentShape(Rectangle())
-            .onTapGesture {
-                guard enabled else { return }
-                editor.begin(key: key, value: text)
-            }
+            // highPriorityGesture：保证「点字 = 改字」优先于外层卡片的点击（例如点卡片进详情）。
+            .highPriorityGesture(
+                TapGesture().onEnded {
+                    guard enabled else { return }
+                    editor.begin(key: key, value: text)
+                }
+            )
     }
 }
 

@@ -2,295 +2,272 @@
 //  HomeView.swift
 //  LeaveSim
 //
-//  请假列表（首页）。导航标题「请假」，区块「进行中」「发起」，底部两个 tab。
-//  「我要请假」和「发起」里的三张卡片都进「请假申请表单页」，「进行中」卡片进「请假详情」。
+//  ①请假列表：进行中卡片 + 发起三卡（其它 / 事假 / 病假）+「没有更多数据了~」+ 底部两 tab。
+//  进行中卡片与详情页共用 q.* / hd.* 同一批 key —— 卡片上改字即改详情，反之亦然。
 //
 
 import SwiftUI
+
+// MARK: - 首页
 
 struct HomeView: View {
     @EnvironmentObject private var store: TextStore
     @Binding var path: [AppRoute]
 
-    @State private var confirmRevoke = false
-    @State private var banner: String?
     @StateObject private var exporter = ShotExporter()
-
-    init(path: Binding<[AppRoute]>) {
-        _path = path
-    }
+    @State private var confirmRevoke = false
 
     var body: some View {
         VStack(spacing: 0) {
             NavHeader(titleKey: "nav.home",
                       title: store["nav.home"],
-                      trailingIcons: ["camera"],
+                      trailing: [.symbol("camera")],
                       onTrailingTap: { _ in exporter.asking = true })
 
             ScrollView(showsIndicators: false) {
                 HomeBody(store: store,
                          interactive: true,
-                         onOpen: { route in path.append(route) },
-                         onRevokeTap: { confirmRevoke = true })
+                         onOpenDetail: { path.append(.detail) },
+                         onStart: { start($0) },
+                         onMore: { path.append(.detail) },
+                         onRevoke: { confirmRevoke = true })
             }
 
             HomeTabBar(store: store,
                        selected: .apply,
-                       onApply: { path.append(.form) },
+                       interactive: true,
+                       onApply: { },
                        onRecord: { path.append(.records) })
         }
         .background(Palette.pageBg)
         .toolbar(.hidden, for: .navigationBar)
-        .confirmationDialog("确定撤销这条请假申请吗？", isPresented: $confirmRevoke, titleVisibility: .visible) {
-            Button("撤销申请", role: .destructive) { banner = "已提交撤销申请" }
-            Button("取消", role: .cancel) {}
-        }
-        .alert("提示", isPresented: Binding(get: { banner != nil },
-                                          set: { if !$0 { banner = nil } })) {
-            Button("好", role: .cancel) {}
-        } message: {
-            Text(banner ?? "")
-        }
+        .navigationBarBackButtonHidden(true)
         .shotExport(exporter, capture: { Shot.render(CaptureHome(store: store)) })
+        .confirmationDialog("撤销这次请假？", isPresented: $confirmRevoke, titleVisibility: .visible) {
+            Button("撤销请假", role: .destructive) {
+                store.set("hd.status", "已撤销")
+                store.set("a.res", "已撤销")
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("撤销后状态会变成「已撤销」，列表和详情同步变色。")
+        }
+    }
+
+    private func start(_ key: String) {
+        let name = store[key]
+        store.set("f.hd.title", name == "其它" ? "请假申请" : name + "申请")
+        path.append(.promise)
     }
 }
 
-// MARK: - 首页正文（首页与截图共用）
+// MARK: - 页面主体
 
 struct HomeBody: View {
     @ObservedObject var store: TextStore
     var interactive: Bool = true
-    var onOpen: (AppRoute) -> Void = { _ in }
-    var onRevokeTap: () -> Void = {}
+    var onOpenDetail: () -> Void = {}
+    var onStart: (String) -> Void = { _ in }
+    var onMore: () -> Void = {}
+    var onRevoke: () -> Void = {}
 
-    @Environment(\.editorCenter) private var editor
-
-    private let typeCards: [(key: String, card: String)] = [
-        ("list.type.other", "list.type.other"),
-        ("list.type.sj",    "list.type.sj"),
-        ("list.type.bj",    "list.type.bj")
-    ]
+    private let typeKeys = ["list.type.1", "list.type.2", "list.type.3"]
 
     var body: some View {
-        VStack(spacing: 0) {
-            sectionHeader("list.sec.active")
+        VStack(alignment: .leading, spacing: Metrics.cardSpacing) {
+            sectionTitle("list.active")
             activeCard
-                .padding(.horizontal, Metrics.cardMargin)
 
-            sectionHeader("list.sec.create")
-            typeCardList
-                .padding(.horizontal, Metrics.cardMargin)
+            sectionTitle("list.start")
+            VStack(spacing: 10) {
+                ForEach(typeKeys, id: \.self) { key in
+                    typeCard(key)
+                }
+            }
 
-            footerText
+            footer
         }
-        .padding(.bottom, 18)
+        .padding(.horizontal, Metrics.cardMargin)
+        .padding(.top, 16)
+        .padding(.bottom, 20)
     }
 
-    private func sectionHeader(_ key: String) -> some View {
-        EditableText(text: store[key], font: Typo.sectionTitle, color: Palette.textPrimary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .editTap(key, store[key], enabled: interactive)
-            .padding(.horizontal, Metrics.cardMargin)
-            .padding(.top, 18)
-            .padding(.bottom, 10)
+    // 小节标题：3pt 蓝色竖条 + 17pt 加粗
+    private func sectionTitle(_ key: String) -> some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Palette.blue)
+                .frame(width: 3, height: 15)
+            EditableText(text: store[key], font: Typo.sectionTitle, color: Palette.textPrimary)
+                .editTap(key, store[key], enabled: interactive)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 4)
     }
 
+    // 进行中卡片
     private var activeCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                EditableText(text: store["list.title"],
-                             font: .system(size: 17, weight: .semibold),
-                             color: Palette.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .editTap("list.title", store["list.title"], enabled: interactive)
+        Card(padding: 20) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    EditableText(text: store["hd.name"],
+                                 font: Typo.cardTitle,
+                                 color: Palette.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .editTap("hd.name", store["hd.name"], enabled: interactive)
 
-                EditableText(text: store["list.status"],
-                             font: .system(size: 13),
-                             color: Palette.green)
-                    .editTap("list.status", store["list.status"], enabled: interactive)
+                    EditableText(text: store["hd.status"],
+                                 font: .system(size: 13, weight: .medium),
+                                 color: store.statusColor(for: "hd.status"))
+                        .editTap("hd.status", store["hd.status"], enabled: interactive)
+                }
+                .padding(.bottom, 6)
+
+                InfoRow(store: store, labelKey: "l.q.start", valueKey: "q.start", interactive: interactive)
+                InfoRow(store: store, labelKey: "l.q.end", valueKey: "q.end", interactive: interactive)
+                InfoRow(store: store, labelKey: "l.q.reason", valueKey: "q.reason", interactive: interactive)
+                InfoRow(store: store, labelKey: "l.q.dur", valueKey: "q.dur", interactive: interactive)
+
+                Divider().overlay(Palette.divider).padding(.vertical, 11)
+
+                HStack(spacing: 8) {
+                    AvatarView(image: store.avatar, size: 22)
+                    EditableText(text: store["q.student"], font: .system(size: 12), color: Palette.textValue)
+                        .editTap("q.student", store["q.student"], enabled: interactive)
+                    Spacer(minLength: 6)
+                    EditableText(text: store["q.submit"], font: .system(size: 11), color: Palette.textLabel)
+                        .editTap("q.submit", store["q.submit"], enabled: interactive)
+                }
+
+                Divider().overlay(Palette.divider).padding(.vertical, 11)
+
+                HStack(spacing: 0) {
+                    HStack(spacing: 5) {
+                        ArtIcon(name: Art.more, width: 15, height: 11, tint: Palette.moreText)
+                        EditableText(text: store["list.more"], font: .system(size: 13), color: Palette.moreText)
+                            .editTap("list.more", store["list.more"], enabled: interactive)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if interactive { onMore() }
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Text(store["revoke"])
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.error)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 15)
+                                .stroke(Palette.error.opacity(0.5), lineWidth: 0.8)
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if interactive { onRevoke() }
+                        }
+                }
             }
-            .padding(.bottom, 2)
-
-            infoRow("l.l.start",  "list.start")
-            infoRow("l.l.end",    "list.end")
-            infoRow("l.l.reason", "list.reason")
-
-            Rectangle()
-                .fill(Palette.divider)
-                .frame(height: 1)
-                .padding(.vertical, 10)
-
-            HStack(spacing: 6) {
-                AvatarView(image: store.avatar, size: 22)
-                EditableText(text: store["list.owner"], font: .system(size: 13), color: Palette.textValue)
-                    .editTap("list.owner", store["list.owner"], enabled: interactive)
-                Spacer(minLength: 8)
-                EditableText(text: store["list.time"], font: .system(size: 13), color: Palette.textLabel)
-                    .editTap("list.time", store["list.time"], enabled: interactive)
-            }
-
-            HStack(spacing: 8) {
-                EditableText(text: store["list.more"], font: .system(size: 13), color: Palette.textLabel)
-                    .editTap("list.more", store["list.more"], enabled: interactive)
-                Spacer(minLength: 8)
-                revokeButton
-            }
-            .padding(.top, 12)
         }
-        .padding(Metrics.cardPadding)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if interactive { onOpenDetail() }
+        }
+    }
+
+    // 发起卡：蓝圈人形（ic_join 位图）+ 类型名
+    private func typeCard(_ key: String) -> some View {
+        HStack(spacing: 12) {
+            ArtImage(name: Art.join, width: 30, height: 30)
+            EditableText(text: store[key], font: .system(size: 15), color: Palette.textPrimary)
+                .editTap(key, store[key], enabled: interactive)
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Palette.textLabel)
+        }
+        .padding(.horizontal, 18)
+        .frame(height: 58)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.white)
         .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture {
-            guard interactive else { return }
-            onOpen(.detail)
+            if interactive { onStart(key) }
         }
     }
 
-    private func infoRow(_ labelKey: String, _ valueKey: String) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            EditableText(text: store[labelKey], font: Typo.label, color: Palette.textLabel)
-                .frame(width: Metrics.labelWidth, alignment: .leading)
-                .editTap(labelKey, store[labelKey], enabled: interactive)
-
-            EditableText(text: store[valueKey], font: Typo.value, color: Palette.textValue, lineSpacing: 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .editTap(valueKey, store[valueKey], enabled: interactive)
+    private var footer: some View {
+        HStack {
+            Spacer()
+            EditableText(text: store["list.footer"], font: .system(size: 12), color: Palette.textLabel)
+                .editTap("list.footer", store["list.footer"], enabled: interactive)
+            Spacer()
         }
-        .frame(minHeight: Metrics.rowHeight, alignment: .topLeading)
-        .padding(.vertical, 8)
-    }
-
-    private var revokeButton: some View {
-        Text(store["list.revoke"])
-            .font(.system(size: 13))
-            .foregroundStyle(Palette.textValue)
-            .lineLimit(1)
-            .padding(.horizontal, 12)
-            .frame(height: 30)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(Palette.ghostBorder, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                guard interactive else { return }
-                onRevokeTap()
-            }
-            .onLongPressGesture(minimumDuration: 0.5) {
-                guard interactive else { return }
-                editor.begin(key: "list.revoke", value: store["list.revoke"])
-            }
-    }
-
-    private var typeCardList: some View {
-        VStack(spacing: 10) {
-            ForEach(Array(typeCards.enumerated()), id: \.offset) { item in
-                HStack(spacing: 12) {
-                    CircleBadge(systemName: "person.fill.badge.plus", size: 32)
-                    EditableText(text: store[item.element.key],
-                                 font: .system(size: 15),
-                                 color: Palette.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .editTap(item.element.key, store[item.element.key], enabled: interactive)
-                }
-                .padding(.horizontal, 18)
-                .frame(height: 56)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Palette.white)
-                .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    guard interactive else { return }
-                    onOpen(.form)
-                }
-            }
-        }
-    }
-
-    private var footerText: some View {
-        EditableText(text: store["list.footer"],
-                     font: .system(size: 13),
-                     color: Palette.textTabIdle,
-                     alignment: .center)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .editTap("list.footer", store["list.footer"], enabled: interactive)
-            .padding(.top, 26)
-            .padding(.bottom, 26)
+        .padding(.top, 18)
+        .padding(.bottom, 6)
     }
 }
 
-// MARK: - 底部 tab 栏
+// MARK: - 底部两 tab
 
 struct HomeTabBar: View {
     @ObservedObject var store: TextStore
     var selected: HomeTab = .apply
     var interactive: Bool = true
-    let onApply: () -> Void
-    let onRecord: () -> Void
-
-    @Environment(\.editorCenter) private var editor
-
-    init(store: TextStore,
-         selected: HomeTab = .apply,
-         interactive: Bool = true,
-         onApply: @escaping () -> Void,
-         onRecord: @escaping () -> Void) {
-        self.store = store
-        self.selected = selected
-        self.interactive = interactive
-        self.onApply = onApply
-        self.onRecord = onRecord
-    }
+    var onApply: () -> Void = {}
+    var onRecord: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 0) {
-            Rectangle()
-                .fill(Palette.divider)
-                .frame(height: 1)
-
+            Rectangle().fill(Palette.divider).frame(height: 0.5)
             HStack(spacing: 0) {
-                item(icon: "bag.badge.plus",
-                     key: "tab.apply",
+                item(activeAsset: Art.tabLeaveActive,
+                     idleAsset: Art.tabLeaveInactive,
+                     labelKey: "tab.apply",
+                     width: 22,
                      active: selected == .apply,
                      action: onApply)
-                item(icon: "person.crop.circle",
-                     key: "tab.record",
+                item(activeAsset: Art.tabRecordActive,
+                     idleAsset: Art.tabRecordInactive,
+                     labelKey: "tab.record",
+                     width: 17,
                      active: selected == .records,
                      action: onRecord)
             }
-            .frame(height: 56)
+            .frame(height: Metrics.bottomTabHeight)
         }
-        .background(Palette.white.ignoresSafeArea(edges: .bottom))
+        .background(Palette.white)
     }
 
-    private func item(icon: String, key: String, active: Bool, action: @escaping () -> Void) -> some View {
+    private func item(activeAsset: String,
+                      idleAsset: String,
+                      labelKey: String,
+                      width: CGFloat,
+                      active: Bool,
+                      action: @escaping () -> Void) -> some View {
         let tint = active ? Palette.blue : Palette.textTabIdle
         return VStack(spacing: 3) {
-            Image(systemName: icon)
-                .font(.system(size: 19, weight: .regular))
-                .foregroundStyle(tint)
-            EditableText(text: store[key],
-                         font: .system(size: 12),
+            ArtIcon(name: active ? activeAsset : idleAsset,
+                    width: width,
+                    height: 22,
+                    tint: tint)
+            EditableText(text: store[labelKey],
+                         font: .system(size: 11, weight: active ? .medium : .regular),
                          color: tint)
-                .editTap(key, store[key], enabled: interactive)
+                .editTap(labelKey, store[labelKey], enabled: interactive)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 56)
+        .frame(height: Metrics.bottomTabHeight)
         .contentShape(Rectangle())
         .onTapGesture {
-            guard interactive else { return }
-            action()
-        }
-        .onLongPressGesture(minimumDuration: 0.5) {
-            guard interactive else { return }
-            editor.begin(key: key, value: store[key])
+            if interactive && !active { action() }
         }
     }
 }
 
-// MARK: - 首页截图
+// MARK: - 截图用静态版
 
 struct CaptureHome: View {
     @ObservedObject var store: TextStore
@@ -298,9 +275,12 @@ struct CaptureHome: View {
     var body: some View {
         VStack(spacing: 0) {
             NavHeader(titleKey: "nav.home", title: store["nav.home"])
-            HomeBody(store: store, interactive: false)
-            HomeTabBar(store: store, selected: .apply, interactive: false, onApply: {}, onRecord: {})
+            ScrollView(showsIndicators: false) {
+                HomeBody(store: store, interactive: false)
+            }
+            HomeTabBar(store: store, selected: .apply, interactive: false)
         }
         .background(Palette.pageBg)
+        .frame(width: Metrics.captureWidth)
     }
 }

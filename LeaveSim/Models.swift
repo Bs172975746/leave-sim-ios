@@ -2,375 +2,589 @@
 //  Models.swift
 //  LeaveSim
 //
-//  全部可编辑文字 + 持久化 + 相册写入。
-//  文本键名沿用 Android 版的 tag（tag 形如 "t:q.student"，这里直接用 "q.student"），
-//  所以 Android 版改过的键在 iOS 版里语义一致。
+//  TextStore：全站可改文案的唯一数据源。任何页面改一个字都写进这里，
+//  再由 `set(_:_:)` 落到 UserDefaults —— 详情页和列表页读的是同一份 key，
+//  所以「详情改完列表自动同步」「列表改完详情不被覆盖」都不需要额外同步代码。
 //
-//  所有姓名 / 手机号 / 地址 / 学校均为虚构占位数据（王小明、示例大学、示例省示例市…），
-//  与任何真实个人无关。
+//  key 命名与 Android 版一致（q.* / d.* / a.* / hd.* / hm.*），
+//  额外补了页面级文案 key（list.* / l.* / f.* / rec.* / flt.* / pr.*）。
 //
 
+import Foundation
 import SwiftUI
 import UIKit
-import PhotosUI
 import Photos
+import PhotosUI
 
-// MARK: - 路由 / Tab / 图片槽
+// MARK: - 路由与局部状态
 
 enum AppRoute: Hashable {
-    case detail      // 请假详情
-    case form        // 请假申请表单
-    case records     // 请假记录
-    case promise     // 请假安全承诺书
+    case detail
+    case form
+    case records
+    case promise
 }
 
-enum DetailTab: Hashable {
-    case leave      // 请假
-    case extend     // 续假
+enum DetailTab: String, CaseIterable {
+    case leave = "请假"
+    case extend = "续假"
 }
 
-enum HomeTab: Hashable {
-    case apply      // 我要请假
-    case records    // 请假记录
+enum HomeTab {
+    case apply
+    case records
 }
 
-enum ImageSlot: String {
-    case avatar = "img.avatar"
-    case proof  = "img.proof"
+enum ImageSlot {
+    case avatar
+    case proof
+
+    var key: String {
+        switch self {
+        case .avatar: return "img.avatar"
+        case .proof:  return "img.proof"
+        }
+    }
 }
 
-// MARK: - 文字仓库
+enum FormField {
+    case start
+    case end
+}
+
+struct WheelState: Identifiable {
+    let id = UUID()
+    var field: FormField
+    var isDate: Bool
+}
+
+// MARK: - 时间与时长
+
+enum TimeFmt {
+    static let formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f
+    }()
+
+    static func parse(_ text: String) -> Date? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return nil }
+        return formatter.date(from: t)
+    }
+
+    static func stamp(_ date: Date = Date()) -> String {
+        formatter.string(from: date)
+    }
+
+    /// 起止时间 → 分钟差。任一不能解析就返回 nil（此时不改时长）。
+    static func minutes(from start: String, to end: String) -> Int? {
+        guard let a = parse(start), let b = parse(end) else { return nil }
+        let mins = Int((b.timeIntervalSince(a) / 60).rounded())
+        return mins
+    }
+
+    /// 分钟 → 「X天X时X分」；不足一天省略「0天」。
+    static func durationText(_ minutes: Int) -> String {
+        let total = max(0, minutes)
+        let d = total / 1440
+        let h = (total % 1440) / 60
+        let m = total % 60
+        if d > 0 {
+            return "\(d)天\(h)时\(m)分"
+        }
+        return "\(h)时\(m)分"
+    }
+}
+
+// MARK: - 全部文案
 
 final class TextStore: ObservableObject {
 
-    /// 所有可编辑字段（键, 默认值）。顺序无关，仅用于建表与恢复默认。
+    /// 默认文案。`key` 与 Android 版对齐；改这里就等于改「恢复默认」的目标。
     static let fields: [(key: String, value: String)] = [
-        // 首页
-        ("nav.home",          "请假"),
-        ("list.sec.active",   "进行中"),
-        ("list.title",        "王小明的其它"),
-        ("list.status",       "即将休假"),
-        ("l.l.start",         "开始时间"),
-        ("l.l.end",           "结束时间"),
-        ("l.l.reason",        "请假原因"),
-        ("list.start",        "2026-11-16 08:40"),
-        ("list.end",          "2026-11-16 10:00"),
-        ("list.reason",       "身体不舒服………"),
-        ("list.owner",        "王小明"),
-        ("list.time",         "2026-11-16 08:02"),
-        ("list.more",         "更多"),
-        ("list.revoke",       "撤销请假申请"),
-        ("list.sec.create",   "发起"),
-        ("list.type.other",   "其它"),
-        ("list.type.sj",      "事假"),
-        ("list.type.bj",      "病假"),
-        ("list.footer",       "没有更多数据了~"),
-        ("tab.apply",         "我要请假"),
-        ("tab.record",        "请假记录"),
+        // ── 导航标题
+        ("nav.home",    "请假"),
+        ("nav.detail",  "请假详情"),
+        ("nav.form",    "发起请假"),
+        ("nav.record",  "请假记录"),
+        ("nav.promise", "请假安全承诺书"),
 
-        // 详情页 · 导航 / Tab / 顶部卡
-        ("nav.title",         "请假详情"),
-        ("tab.qj",            "请假"),
-        ("tab.xj",            "续假"),
-        ("hd.rule",           "请假规则"),
-        ("hd.name",           "王小明的其它"),
-        ("hd.status",         "已通过"),
+        // ── 列表页
+        ("list.active", "进行中"),
+        ("list.start",  "发起请假"),
+        ("list.more",   "更多"),
+        ("revoke",      "撤销请假"),
+        ("list.footer", "没有更多数据了~"),
+        ("list.type.1", "其它"),
+        ("list.type.2", "事假"),
+        ("list.type.3", "病假"),
 
-        // 详情页 · 请假内容
-        ("sec.info",          "请假内容"),
-        ("l.q.student",       "请假学生"),
-        ("q.student",         "王小明"),
-        ("l.q.start",         "开始时间"),
-        ("q.start",           "2026-09-23 07:01"),
-        ("l.q.end",           "结束时间"),
-        ("q.end",             "2026-09-24 21:00"),
-        ("l.q.dur",           "请假时长"),
-        ("q.dur",             "1天13时59分"),
-        ("l.q.course",        "影响课程"),
-        ("q.course",          "无"),
-        ("l.q.reason",        "请假原因"),
-        ("q.reason",          "返乡回家，已购买23号的车票"),
-        ("l.q.proof",         "证明材料"),
-        ("q.proof",           "-"),
-        ("l.q.place",         "发起位置"),
-        ("q.place",           "示例省示例市示例区示例路88号"),
+        // ── 底部 tab
+        ("tab.apply",  "我要请假"),
+        ("tab.record", "请假记录"),
 
-        // 详情页 · 请假去向
-        ("sec.dest",          "请假去向"),
-        ("l.d.left",          "是否离校"),
-        ("d.left",            "是"),
-        ("l.d.dest",          "目的地"),
-        ("d.dest",            "示例省/示例市/示例区"),
-        ("l.d.addr",          "详细地址"),
-        ("d.addr",            "示例小区3号楼"),
-        ("l.d.emerg",         "紧急联系人"),
-        ("d.emerg",           "13800001234"),
-        ("l.d.tel",           "联系电话"),
-        ("d.tel",             "13900005678"),
+        // ── 详情页 / 进行中卡片共用的业务字段
+        ("请假", "请假"),
+        ("续假", "续假"),
+        ("hd.rule",   "请假规则"),
+        ("sec.info",  "请假内容"),
+        ("sec.dest",  "请假去向"),
+        ("sec.approval", "审批流程"),
+        ("sec.xj",    "续假信息"),
+        ("hd.name",   "王小明的请假申请"),
+        ("hd.status", "审批中"),
+        ("q.student", "王小明"),
+        ("q.start",   "2026-11-30 08:00"),
+        ("q.end",     "2026-12-01 21:59"),
+        ("q.dur",     "1天13时59分"),
+        ("q.course",  "数据结构、计算机网络"),
+        ("q.reason",  "家中有事，需回家处理，已与辅导员沟通"),
+        ("q.proof",   "-"),
+        ("q.place",   "示例省示例市示例区"),
+        ("q.submit",  "2026-11-28 09:12 提交"),
 
-        // 详情页 · 审批流程
-        ("sec.approval",      "审批流程"),
-        ("l.a.who",           "审批人"),
-        ("a.who",             "辅导员 李老师"),
-        ("l.a.res",           "审批结果"),
-        ("a.res",             "已通过"),
-        ("l.a.time",          "审批时间"),
-        ("a.time",            "2026-09-23 08:15"),
-        ("l.a.note",          "审批意见"),
-        ("a.note",            "同意，返校后及时找辅导员销假"),
+        ("l.q.student", "学生姓名"),
+        ("l.q.start",   "开始时间"),
+        ("l.q.end",     "结束时间"),
+        ("l.q.dur",     "请假时长"),
+        ("l.q.course",  "课程"),
+        ("l.q.reason",  "请假原因"),
+        ("l.q.proof",   "证明材料"),
+        ("l.q.place",   "请假地点"),
 
-        // 详情页 · 续假内容
-        ("sec.xj",            "续假内容"),
-        ("l.x.student",       "续假学生"),
-        ("x.student",         "王小明"),
-        ("l.x.start",         "开始时间"),
-        ("x.start",           "2026-09-24 21:00"),
-        ("l.x.end",           "结束时间"),
-        ("x.end",             "2026-09-26 21:00"),
-        ("l.x.dur",           "续假时长"),
-        ("x.dur",             "2天"),
-        ("l.x.course",        "影响课程"),
-        ("x.course",          "无"),
-        ("l.x.reason",        "续假原因"),
-        ("x.reason",          "车票改签，推迟返校"),
-        ("l.x.proof",         "证明材料"),
-        ("x.proof",           "-"),
-        ("l.x.place",         "发起位置"),
-        ("x.place",           "示例省示例市示例区示例路88号"),
+        ("d.left",  "是"),
+        ("d.dest",  "回家"),
+        ("d.addr",  "示例省示例市示例区示例路88号 示例小区3号楼"),
+        ("d.emerg", "王大明 13800001234"),
+        ("d.tel",   "13900005678"),
 
-        // 详情页 · 底栏
-        ("bottom.more",       "更多"),
-        ("bottom.fwd",        "转发"),
+        ("l.d.left",  "是否离校"),
+        ("l.d.dest",  "请假去向"),
+        ("l.d.addr",  "详细地址"),
+        ("l.d.emerg", "紧急联系人"),
+        ("l.d.tel",   "联系电话"),
 
-        // 请假申请表单页
-        ("nav.form",          "请假"),
-        ("f.hd.title",        "其它"),
-        ("l.f.start",         "开始时间"),
-        ("f.start",           "请选择"),
-        ("l.f.end",           "结束时间"),
-        ("f.end",             "请选择"),
-        ("l.f.dur",           "请假时长"),
-        ("f.dur.d",           "0"),
-        ("f.dur.h",           "0"),
-        ("f.dur.m",           "0"),
-        ("f.unit.d",          "天"),
-        ("f.unit.h",          "时"),
-        ("f.unit.m",          "分"),
-        ("l.f.course",        "影响课程"),
-        ("f.course",          "无"),
-        ("l.f.reason",        "请假原因"),
-        ("f.reason",          ""),
-        ("f.reason.ph",       "请输入"),
-        ("l.f.proof",         "证明材料"),
-        ("f.proof.count",     "0/4"),
-        ("f.proof.hint",      "请上传证明材料"),
-        ("l.f.place",         "发起位置"),
-        ("f.place",           "示例省示例市示例区示例路88号"),
-        ("f.relocate",        "重新定位"),
-        ("l.f.left",          "是否离校"),
-        ("f.left",            "请选择"),
-        ("sec.cc",            "抄送人"),
-        ("f.cc.title",        "常用抄送人（可点击下方标签选中人员）"),
-        ("f.cc.edit",         "编辑"),
-        ("f.cc.empty",        "暂无数据，请点击编辑进行设置"),
-        ("f.cc.a",            "王老师"),
-        ("f.cc.b",            "李老师"),
-        ("f.cc.c",            "赵老师"),
-        ("f.submit",          "提交"),
+        ("a.who",  "辅导员 李老师"),
+        ("a.res",  "审批中"),
+        ("a.time", "2026-11-28 09:20"),
+        ("a.note", "已收到，注意安全，按时返校"),
 
-        // 请假记录页
-        ("nav.record",        "请假"),
-        ("rec.tip",           "当前学期累计完成请假5次，共计时长1天21时59分"),
-        ("rec.sec",           "已完成"),
-        ("rec.status",        "已完成"),
-        ("rec1.title",        "王小明的其它"),
-        ("rec1.start",        "2026-11-13 08:40"),
-        ("rec1.end",          "2026-11-13 17:00"),
-        ("rec1.reason",       "回家处理个人事务"),
-        ("rec1.owner",        "王小明"),
-        ("rec1.at",           "2026-11-13 08:02"),
-        ("rec2.title",        "王小明的病假"),
-        ("rec2.start",        "2026-10-20 08:30"),
-        ("rec2.end",          "2026-10-21 18:00"),
-        ("rec2.reason",       "感冒发烧，需要休息"),
-        ("rec2.owner",        "王小明"),
-        ("rec2.at",           "2026-10-20 08:05"),
-        ("rec3.title",        "王小明的事假"),
-        ("rec3.start",        "2026-09-30 14:00"),
-        ("rec3.end",          "2026-09-30 18:00"),
-        ("rec3.reason",       "参加校招宣讲会"),
-        ("rec3.owner",        "王小明"),
-        ("rec3.at",           "2026-09-30 09:12"),
+        ("l.a.who",  "审批人"),
+        ("l.a.res",  "审批结果"),
+        ("l.a.time", "审批时间"),
+        ("l.a.note", "审批备注"),
 
-        // 筛选弹层
-        ("flt.title",         "筛选"),
-        ("flt.type",          "请假类型"),
-        ("flt.type.value",    "全部类型"),
-        ("flt.start",         "发起时间"),
-        ("flt.date.a",        "请选择日期"),
-        ("flt.date.b",        "请选择日期"),
-        ("flt.leave",         "请假时间"),
-        ("flt.date.c",        "请选择日期"),
-        ("flt.date.d",        "请选择日期"),
-        ("flt.dur",           "请假时长"),
-        ("flt.dur.a",         "请选择时长"),
-        ("flt.dur.b",         "请选择时长"),
-        ("flt.status",        "请假单状态"),
-        ("flt.s1",            "全部"),
-        ("flt.s2",            "审批中"),
-        ("flt.s3",            "即将休假"),
-        ("flt.s4",            "休假中"),
-        ("flt.s5",            "销假逾期"),
-        ("flt.s6",            "已撤销"),
-        ("flt.s7",            "已驳回"),
-        ("flt.s8",            "已完成"),
-        ("flt.reset",         "重置"),
-        ("flt.ok",            "确定"),
+        // ── 续假 tab
+        ("hm.name",   "王小明的续假申请"),
+        ("hm.status", "审批中"),
+        ("hm.v1",     "2026-12-01 22:00 至 2026-12-03 18:00"),
+        ("hm.v2",     "2天20时0分"),
+        ("hm.v3",     "返程车票延误，需顺延两天"),
+        ("hm.who",    "辅导员 李老师"),
+        ("hm.time",   "2026-11-29 10:05"),
 
-        // 请假安全承诺书
-        ("nav.promise",       "请假安全承诺书"),
-        ("pr.t",              "本人知晓学校关于学生请假管理的相关规定，并自愿作出如下承诺："),
-        ("pr.1",              "一、请假期间严格遵守国家法律法规和学校各项规章制度，不参与任何违法违规活动，注意人身与财产安全。"),
-        ("pr.2",              "二、已如实填写请假理由、去向及联系方式，保证信息真实有效；请假期间保持通讯畅通，随时接受学校、学院的核查。"),
-        ("pr.3",              "三、如有弄虚作假、擅自更改去向或逾期不归，本人自愿承担由此产生的一切后果，并接受学校依据《示例大学学生管理规定》作出的处理。"),
-        ("pr.4",              "四、保证在请假期满后按时返校销假；确需延长的，提前在系统中提交续假申请，未经批准不擅自延期。"),
-        ("pr.check",          "本人已阅读知晓以上《请假安全承诺书》的所有内容，并同意上述承诺。"),
-        ("pr.no",             "不同意"),
-        ("pr.yes",            "同意并继续")
+        ("l.hm.v1",   "续假时间"),
+        ("l.hm.v2",   "续假时长"),
+        ("l.hm.v3",   "续假原因"),
+        ("l.hm.who",  "审批人"),
+        ("l.hm.time", "申请时间"),
+
+        ("bottom.more", "更多"),
+        ("bottom.fwd",  "转发"),
+
+        // ── 承诺书
+        ("pr.t", "请假安全承诺书"),
+        ("pr.1", "本人因个人事务申请离校，已充分阅读并理解学校《学生请假管理规定》及《学生安全教育手册》的全部内容，自愿作出如下承诺。"),
+        ("pr.2", "一、本人保证所填写的请假事由、去向、联系方式等信息真实、准确、完整，如有隐瞒或虚报，愿承担由此产生的一切后果。"),
+        ("pr.3", "二、离校期间严格遵守国家法律法规和校纪校规，不参与任何违法违纪活动，不前往疫情中高风险地区及无人值守的危险区域，注意交通、饮食、人身与财产安全。"),
+        ("pr.4", "三、保持通讯畅通，主动向辅导员及家长报告行程，按时返校销假；如遇突发情况，第一时间联系辅导员 李老师（13800001234）。"),
+        ("pr.check", "我已阅读并同意以上全部内容"),
+        ("pr.no",    "不同意"),
+        ("pr.yes",   "同意并继续"),
+
+        // ── 申请表
+        ("f.hd.title", "请假申请"),
+        ("f.start",    "请选择开始时间"),
+        ("f.end",      "请选择结束时间"),
+        ("f.dur",      "0时0分"),
+        ("f.course",   "请填写课程"),
+        ("f.reason",   "请填写请假原因（不超过1000字）"),
+        ("f.proof",    "点击上传证明材料"),
+        ("f.place",    "请填写请假地点"),
+        ("f.left",     "是"),
+        ("f.dest",     "请填写去向"),
+        ("f.addr",     "请填写详细地址"),
+        ("f.emerg",    "请填写紧急联系人"),
+        ("f.tel",      "请填写联系电话"),
+        ("f.submit",   "提交"),
+        ("f.hint",     "此项为必填项"),
+
+        ("sec.f.info", "请假内容"),
+        ("sec.f.dest", "请假去向"),
+        ("sec.cc",     "抄送人"),
+        ("l.f.start",  "开始时间"),
+        ("l.f.end",    "结束时间"),
+        ("l.f.dur",    "请假时长"),
+        ("l.f.course", "课程"),
+        ("l.f.reason", "请假原因"),
+        ("l.f.proof",  "证明材料"),
+        ("l.f.place",  "请假地点"),
+        ("l.f.left",   "是否离校"),
+        ("l.f.dest",   "请假去向"),
+        ("l.f.addr",   "详细地址"),
+        ("l.f.emerg",  "紧急联系人"),
+        ("l.f.tel",    "联系电话"),
+        ("f.cc.1",     "辅导员 李老师"),
+        ("f.cc.2",     "班长 赵同学"),
+        ("f.cc.3",     "室友 陈同学"),
+        ("f.cc.add",   "添加抄送人"),
+
+        // ── 记录页
+        ("rec.tip",    "本学期共提交 3 次请假，累计 5 天 6 时 0 分"),
+        ("rec.sec",    "全部记录"),
+        ("rec.status", "3 条"),
+        ("rec.more",   "查看全部记录"),
+        ("rec.footer", "没有更多数据了~"),
+
+        ("rec1.name",   "王小明的请假申请"),
+        ("rec1.time",   "2026-11-30 08:00 至 2026-12-01 21:59"),
+        ("rec1.reason", "家中有事，需回家处理"),
+        ("rec1.dur",    "1天13时59分"),
+        ("rec1.status", "审批中"),
+
+        ("rec2.name",   "王小明的请假申请"),
+        ("rec2.time",   "2026-11-10 08:00 至 2026-11-11 18:00"),
+        ("rec2.reason", "参加校级程序设计竞赛"),
+        ("rec2.dur",    "1天10时0分"),
+        ("rec2.status", "已完成"),
+
+        ("rec3.name",   "王小明的请假申请"),
+        ("rec3.time",   "2026-10-20 08:00 至 2026-10-21 12:00"),
+        ("rec3.reason", "身体不适，前往医院就诊"),
+        ("rec3.dur",    "1天4时0分"),
+        ("rec3.status", "已驳回"),
+
+        // ── 筛选弹层
+        ("flt.title", "筛选"),
+        ("flt.type",  "请假类型"),
+        ("flt.date1", "请假开始时间"),
+        ("flt.date2", "请假结束时间"),
+        ("flt.dur",   "请假时长"),
+        ("flt.status", "审批状态"),
+        ("flt.reset", "重置"),
+        ("flt.ok",    "确定"),
+        ("flt.from",  "开始日期"),
+        ("flt.to",    "结束日期"),
+        ("flt.unit.d", "天"),
+        ("flt.unit.h", "时"),
+        ("flt.unit.m", "分"),
+        ("flt.d1.s", "2026-10-01"),
+        ("flt.d1.e", "2026-11-30"),
+        ("flt.d2.s", "2026-10-01"),
+        ("flt.d2.e", "2026-11-30"),
+        ("flt.dur.d", "0"),
+        ("flt.dur.h", "0"),
+        ("flt.dur.m", "0"),
+        ("flt.close", "关闭"),
+        ("flt.type.1", "其它"),
+        ("flt.type.2", "事假"),
+        ("flt.type.3", "病假"),
+        ("flt.type.4", "全部"),
+        ("flt.s1", "待审批"),
+        ("flt.s2", "审批中"),
+        ("flt.s3", "已通过"),
+        ("flt.s4", "已驳回"),
+        ("flt.s5", "已撤销"),
+        ("flt.s6", "已完成"),
+        ("flt.s7", "即将休假"),
+        ("flt.s8", "逾期")
     ]
 
-    static let defaults: [String: String] =
-        Dictionary(uniqueKeysWithValues: fields.map { ($0.key, $0.value) })
+    static let defaults: [String: String] = Dictionary(uniqueKeysWithValues: fields.map { ($0.key, $0.value) })
 
-    @Published private(set) var values: [String: String] = [:]
+    // MARK: 状态
+
+    @Published private(set) var values: [String: String]
     @Published private(set) var avatar: UIImage?
     @Published private(set) var proof: UIImage?
 
     private let ud = UserDefaults.standard
 
+    /// 可以点开改的 key（不含空 key）
+    static let editableKeys: Set<String> = Set(fields.map { $0.key })
+
     init() {
-        var loaded = Self.defaults
-        for (key, _) in Self.fields {
-            if let saved = ud.string(forKey: key) {
-                loaded[key] = saved
+        var seed = TextStore.defaults
+        for key in TextStore.defaults.keys {
+            if let saved = UserDefaults.standard.string(forKey: key) {
+                seed[key] = saved
             }
         }
-        values = loaded
+        self.values = seed
+        self.avatar = TextStore.loadImage(.avatar)
+        self.proof = TextStore.loadImage(.proof)
 
-        if let data = ud.data(forKey: ImageSlot.avatar.rawValue) {
-            avatar = UIImage(data: data)
-        }
-        if let data = ud.data(forKey: ImageSlot.proof.rawValue) {
-            proof = UIImage(data: data)
+        // 首次启动 / 旧版本 key：把缺的补进 UserDefaults，方便「重启后仍是改过的值」
+        for (key, value) in seed where UserDefaults.standard.string(forKey: key) == nil {
+            UserDefaults.standard.set(value, forKey: key)
         }
     }
 
+    // MARK: 读写
+
     subscript(_ key: String) -> String {
-        values[key] ?? Self.defaults[key] ?? ""
+        values[key] ?? TextStore.defaults[key] ?? ""
     }
 
     func set(_ key: String, _ value: String) {
-        values[key] = value
-        ud.set(value, forKey: key)
+        guard !key.isEmpty else { return }
+        if values[key] != value {
+            values[key] = value
+            ud.set(value, forKey: key)
+        }
+        // 联动：改起止时间就地重算时长（详情 q.* 与表单 f.* 各一套）
+        switch key {
+        case "q.start", "q.end":
+            refreshDuration(prefix: "q")
+        case "f.start", "f.end":
+            refreshDuration(prefix: "f")
+        default:
+            break
+        }
     }
 
-    var isOffCampus: Bool {
-        let v = self["d.left"].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if v.isEmpty { return false }
-        return v.hasPrefix("否") || v.hasPrefix("不") || v.hasPrefix("no")
-            || v.hasPrefix("false") || v.hasPrefix("0")
+    private func refreshDuration(prefix: String) {
+        guard let mins = TimeFmt.minutes(from: self["\(prefix).start"], to: self["\(prefix).end"]) else { return }
+        let text = TimeFmt.durationText(mins)
+        let key = "\(prefix).dur"
+        if values[key] != text {
+            values[key] = text
+            ud.set(text, forKey: key)
+        }
+    }
+
+    // MARK: 派生状态
+
+    /// 是否离校：值为「是 / 否」之类。
+    var leavesCampus: Bool {
+        let v = self["d.left"].trimmingCharacters(in: .whitespaces)
+        if v.hasPrefix("否") || v.hasPrefix("不") { return false }
+        let low = v.lowercased()
+        if low.hasPrefix("no") || low.hasPrefix("false") || v.hasPrefix("0") { return false }
+        return true
     }
 
     func toggleLeaveType() {
-        set("d.left", isOffCampus ? "是" : "否")
+        // 先定好目标值再写，避免第一句改完 d.left 后 leavesCampus 已经变了导致两边不一致
+        let next = leavesCampus ? "否" : "是"
+        set("d.left", next)
+        set("f.left", next)
     }
 
-    func resetAll() {
-        for (key, _) in Self.fields {
-            ud.removeObject(forKey: key)
+    func statusColor(for key: String) -> Color {
+        StatusTone.color(self[key])
+    }
+
+    // MARK: 表单校验
+
+    private static let blankValues: Set<String> = ["", "-", "—", "请选择", "请选择开始时间", "请选择结束时间", "请填写", "点击填写"]
+
+    func isFilled(_ key: String) -> Bool {
+        let v = self[key].trimmingCharacters(in: .whitespacesAndNewlines)
+        if TextStore.blankValues.contains(v) { return false }
+        if v.hasPrefix("请填写") || v.hasPrefix("请选择") || v.hasPrefix("点击上传") { return false }
+        return true
+    }
+
+    /// 表单必填项（顺序即提示顺序）
+    static let requiredFormKeys = ["f.start", "f.end", "f.course", "f.reason", "f.place"]
+
+    func requiredHint(_ key: String) -> String {
+        "f.hint." + key
+    }
+
+    /// 返回缺失项数量；同时把红字提示写进 `f.hint.<key>`。
+    @discardableResult
+    func validateForm() -> Int {
+        var missing: [String] = []
+        for key in TextStore.requiredFormKeys where !isFilled(key) {
+            missing.append(key)
         }
-        ud.removeObject(forKey: ImageSlot.avatar.rawValue)
-        ud.removeObject(forKey: ImageSlot.proof.rawValue)
-        values = Self.defaults
-        avatar = nil
-        proof = nil
+        for key in TextStore.requiredFormKeys {
+            set(requiredHint(key), missing.contains(key) ? self["f.hint"] : "")
+        }
+        return missing.count
+    }
+
+    /// 提交：把表单值写回详情页/列表共用的 q.* 字段，并回到列表。
+    func commitForm() {
+        set("q.start", self["f.start"])
+        set("q.end", self["f.end"])
+        set("q.course", self["f.course"])
+        set("q.reason", self["f.reason"])
+        if isFilled("f.proof") { set("q.proof", self["f.proof"]) }
+        set("q.place", self["f.place"])
+        set("d.left", self["f.left"])
+        if isFilled("f.dest")  { set("d.dest", self["f.dest"]) }
+        if isFilled("f.addr")  { set("d.addr", self["f.addr"]) }
+        if isFilled("f.emerg") { set("d.emerg", self["f.emerg"]) }
+        if isFilled("f.tel")   { set("d.tel", self["f.tel"]) }
+
+        set("hd.status", "审批中")
+        set("a.res", "审批中")
+        set("q.submit", TimeFmt.stamp() + " 提交")
+
+        let name = self["q.student"].isEmpty ? "王小明" : self["q.student"]
+        set("hd.name", name + "的请假申请")
+    }
+
+    /// 把详情页的当前内容灌进表单，作为「再次发起」的初值。
+    func prefillForm() {
+        set("f.start", self["q.start"])
+        set("f.end", self["q.end"])
+        set("f.dur", self["q.dur"])
+        set("f.course", self["q.course"])
+        set("f.reason", self["q.reason"])
+        set("f.proof", self["q.proof"])
+        set("f.place", self["q.place"])
+        set("f.left", self["d.left"])
+        set("f.dest", self["d.dest"])
+        set("f.addr", self["d.addr"])
+        set("f.emerg", self["d.emerg"])
+        set("f.tel", self["d.tel"])
+        for key in TextStore.requiredFormKeys {
+            set(requiredHint(key), "")
+        }
     }
 
     // MARK: 图片
 
-    @MainActor
+    func image(for slot: ImageSlot) -> UIImage? {
+        switch slot {
+        case .avatar: return avatar
+        case .proof:  return proof
+        }
+    }
+
     func loadImage(_ item: PhotosPickerItem?, slot: ImageSlot) async {
         guard let item else { return }
         guard let data = try? await item.loadTransferable(type: Data.self),
               let image = UIImage(data: data) else { return }
-        let small = image.resized(maxDimension: 320)
-        guard let jpeg = small.jpegData(compressionQuality: 0.9) else { return }
-        ud.set(jpeg, forKey: slot.rawValue)
-        let decoded = UIImage(data: jpeg)
+        let small = image.resized(maxDimension: 640)
+        await MainActor.run {
+            self.store(image: small, slot: slot)
+        }
+    }
+
+    func store(image: UIImage, slot: ImageSlot) {
         switch slot {
-        case .avatar: avatar = decoded
-        case .proof:  proof = decoded
+        case .avatar:
+            avatar = image
+            TextStore.write(image, slot: slot)
+        case .proof:
+            proof = image
+            TextStore.write(image, slot: slot)
         }
     }
 
     func clearImage(_ slot: ImageSlot) {
-        ud.removeObject(forKey: slot.rawValue)
         switch slot {
         case .avatar: avatar = nil
         case .proof:  proof = nil
         }
+        if let url = TextStore.imageURL(slot) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private static func imageURL(_ slot: ImageSlot) -> URL? {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(slot.key + ".jpg")
+    }
+
+    private static func write(_ image: UIImage, slot: ImageSlot) {
+        guard let url = imageURL(slot), let data = image.jpegData(compressionQuality: 0.9) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private static func loadImage(_ slot: ImageSlot) -> UIImage? {
+        guard let url = imageURL(slot), let data = try? Data(contentsOf: url) else { return nil }
+        return UIImage(data: data)
+    }
+
+    // MARK: 恢复默认
+
+    /// 只把筛选弹层用到的 flt.* 恢复默认，不动用户改过的业务数据。
+    func resetFilterFields() {
+        for (key, value) in TextStore.defaults where key.hasPrefix("flt.") {
+            values[key] = value
+            ud.set(value, forKey: key)
+        }
+    }
+
+    func resetAll() {
+        for (key, value) in TextStore.defaults {
+            values[key] = value
+            ud.set(value, forKey: key)
+        }
+        clearImage(.avatar)
+        clearImage(.proof)
+        refreshDuration(prefix: "q")
+        refreshDuration(prefix: "f")
     }
 }
 
-// MARK: - 图片缩放
+// MARK: - UIImage 缩放
 
 extension UIImage {
     func resized(maxDimension: CGFloat) -> UIImage {
         let longest = max(size.width, size.height)
         guard longest > maxDimension, longest > 0 else { return self }
-        let ratio = maxDimension / longest
-        let target = CGSize(width: (size.width * ratio).rounded(), height: (size.height * ratio).rounded())
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
-        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+        let scale = maxDimension / longest
+        let target = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: target)
+        return renderer.image { _ in
             draw(in: CGRect(origin: .zero, size: target))
         }
     }
 }
 
-// MARK: - 相册写入
+// MARK: - 存相册
 
 enum AlbumWriter {
-    static func save(_ image: UIImage) async throws {
-        let status = await requestAddOnly()
-        guard status == .authorized || status == .limited else {
-            throw NSError(domain: "LeaveSim", code: -1,
-                          userInfo: [NSLocalizedDescriptionKey: "没有相册写入权限，去「设置 → 隐私 → 照片」打开"])
-        }
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
-            } completionHandler: { success, error in
-                if success {
-                    continuation.resume()
-                } else {
-                    continuation.resume(throwing: error ?? NSError(domain: "LeaveSim", code: -2,
-                                                                  userInfo: [NSLocalizedDescriptionKey: "保存失败"]))
-                }
+    enum Failure: LocalizedError {
+        case denied
+
+        var errorDescription: String? {
+            switch self {
+            case .denied: return "没有相册权限，请到「设置 → 隐私 → 照片」里允许写入"
             }
         }
     }
 
-    private static func requestAddOnly() async -> PHAuthorizationStatus {
-        await withCheckedContinuation { (continuation: CheckedContinuation<PHAuthorizationStatus, Never>) in
-            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-                continuation.resume(returning: status)
+    static func save(_ image: UIImage) async throws {
+        let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        var granted = status == .authorized || status == .limited
+
+        if status == .notDetermined {
+            granted = await withCheckedContinuation { cont in
+                PHPhotoLibrary.requestAuthorization(for: .addOnly) { new in
+                    cont.resume(returning: new == .authorized || new == .limited)
+                }
             }
+        }
+        guard granted else { throw Failure.denied }
+
+        try await PHPhotoLibrary.shared().performChanges {
+            PHAssetChangeRequest.creationRequestForAsset(from: image)
         }
     }
 }
 
-// MARK: - 分享负载
+// MARK: - 分享
 
 struct SharePayload: Identifiable {
     let id = UUID()

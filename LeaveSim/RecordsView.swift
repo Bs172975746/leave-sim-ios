@@ -2,201 +2,220 @@
 //  RecordsView.swift
 //  LeaveSim
 //
-//  请假记录页（导航标题「请假」，右上漏斗打开筛选弹层）+ 底部 tab 记录为选中态。
+//  ⑤请假记录：统计条 + 卡片列表 + 筛选入口 + 底部 tab；
+//  ⑥筛选底部弹层：请假类型、两组日期区间、时长区间、8 个状态 chip、重置 / 确定。
 //
 
 import SwiftUI
+
+// MARK: - 记录页
 
 struct RecordsView: View {
     @EnvironmentObject private var store: TextStore
     @Environment(\.dismiss) private var dismiss
     @Binding var path: [AppRoute]
 
-    @State private var filterShown = false
-    @State private var statusKey = "flt.s1"
     @StateObject private var exporter = ShotExporter()
-
-    init(path: Binding<[AppRoute]>) {
-        _path = path
-    }
+    @State private var showFilter = false
+    @State private var selection = FilterSelection()
 
     var body: some View {
-        VStack(spacing: 0) {
-            NavHeader(titleKey: "nav.record",
-                      title: store["nav.record"],
-                      showsBack: true,
-                      onBack: { dismiss() },
-                      trailingIcons: ["line.3.horizontal.decrease", "camera"],
-                      onTrailingTap: { index in
-                          if index == 0 {
-                              filterShown = true
-                          } else {
-                              exporter.asking = true
-                          }
-                      })
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                NavHeader(titleKey: "nav.record",
+                          title: store["nav.record"],
+                          showsBack: true,
+                          onBack: { dismiss() },
+                          trailing: [.asset(selection.isActive ? Art.filterActive : Art.filterInactive,
+                                            selection.isActive ? Palette.blue : Palette.textLabel),
+                                     .symbol("camera")],
+                          onTrailingTap: { index in
+                              if index == 0 {
+                                  showFilter = true
+                              } else {
+                                  exporter.asking = true
+                              }
+                          })
 
-            ScrollView(showsIndicators: false) {
-                RecordsBody(store: store, interactive: true)
+                ScrollView(showsIndicators: false) {
+                    RecordsBody(store: store,
+                                interactive: true,
+                                countText: selection.summary(store),
+                                onOpenDetail: { path.append(.detail) })
+                }
+
+                HomeTabBar(store: store,
+                           selected: .records,
+                           interactive: true,
+                           onApply: { path.removeAll() },
+                           onRecord: {})
             }
+            .background(Palette.pageBg)
 
-            HomeTabBar(store: store,
-                       selected: .records,
-                       onApply: { path.removeAll() },
-                       onRecord: {})
-        }
-        .background(Palette.pageBg)
-        .toolbar(.hidden, for: .navigationBar)
-        .overlay {
-            if filterShown {
+            if showFilter {
                 FilterPanel(store: store,
-                            statusKey: $statusKey,
-                            onClose: { filterShown = false },
-                            onReset: {
-                                statusKey = "flt.s1"
-                                exporter.flash("已重置筛选条件")
-                            },
-                            onConfirm: {
-                                filterShown = false
-                                exporter.flash("已按条件筛选")
-                            })
+                            selection: $selection,
+                            onClose: { showFilter = false },
+                            onConfirm: { showFilter = false })
+                    .transition(.move(edge: .bottom))
+                    .zIndex(5)
             }
         }
-        .shotExport(exporter, capture: { Shot.render(CaptureRecords(store: store)) })
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
+        .animation(.easeInOut(duration: 0.2), value: showFilter)
+        .shotExport(exporter, capture: {
+            Shot.render(CaptureRecords(store: store))
+        })
     }
 }
 
-// MARK: - 记录正文
+// MARK: - 筛选状态
+
+struct FilterSelection {
+    /// 1 / 2 / 3 = 其它 / 事假 / 病假；4 = 全部
+    var type: Int = 4
+    var statuses: Set<Int> = []
+
+    var isActive: Bool {
+        type != 4 || !statuses.isEmpty
+    }
+
+    func summary(_ store: TextStore) -> String {
+        if !isActive { return store["rec.status"] }
+        var parts: [String] = []
+        if type != 4 { parts.append(store["flt.type.\(type)"]) }
+        if !statuses.isEmpty {
+            let names = statuses.sorted().map { store["flt.s\($0)"] }
+            parts.append(names.joined(separator: "/"))
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - 记录主体
 
 struct RecordsBody: View {
     @ObservedObject var store: TextStore
     var interactive: Bool = true
+    var countText: String? = nil
+    var onOpenDetail: () -> Void = {}
 
-    @Environment(\.editorCenter) private var editor
-
-    private let records: [(String, String, String, String, String, String)] = [
-        ("rec1.title", "rec1.start", "rec1.end", "rec1.reason", "rec1.owner", "rec1.at"),
-        ("rec2.title", "rec2.start", "rec2.end", "rec2.reason", "rec2.owner", "rec2.at"),
-        ("rec3.title", "rec3.start", "rec3.end", "rec3.reason", "rec3.owner", "rec3.at")
-    ]
+    private let recordIndexes = [1, 2, 3]
 
     var body: some View {
-        VStack(spacing: 0) {
-            tipBar
+        VStack(alignment: .leading, spacing: Metrics.cardSpacing) {
+            statBar
 
-            ForEach(Array(records.enumerated()), id: \.offset) { item in
-                recordCard(item.element)
-                    .padding(.horizontal, Metrics.cardMargin)
-                    .padding(.top, 12)
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Palette.blue)
+                    .frame(width: 3, height: 15)
+                EditableText(text: store["rec.sec"], font: Typo.sectionTitle, color: Palette.textPrimary)
+                    .editTap("rec.sec", store["rec.sec"], enabled: interactive)
+                Spacer(minLength: 0)
+                EditableText(text: countText ?? store["rec.status"],
+                             font: .system(size: 12),
+                             color: Palette.textLabel)
+                    .editTap("rec.status", store["rec.status"], enabled: interactive)
+            }
+            .padding(.top, 2)
+
+            ForEach(recordIndexes, id: \.self) { index in
+                recordCard(index)
             }
 
-            EditableText(text: store["list.footer"],
-                         font: .system(size: 13),
-                         color: Palette.textTabIdle,
-                         alignment: .center)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .editTap("list.footer", store["list.footer"], enabled: interactive)
-                .padding(.vertical, 24)
+            footer
         }
-        .padding(.bottom, 12)
+        .padding(.horizontal, Metrics.cardMargin)
+        .padding(.top, 13)
+        .padding(.bottom, 20)
     }
 
-    private var tipBar: some View {
-        HStack(spacing: 0) {
-            EditableText(text: store["rec.tip"],
-                         font: .system(size: 12),
-                         color: Palette.blue,
-                         lineSpacing: 2)
+    // 统计条
+    private var statBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "chart.bar.doc.horizontal")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Palette.blue)
+            EditableText(text: store["rec.tip"], font: .system(size: 12), color: Palette.textValue)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .editTap("rec.tip", store["rec.tip"], enabled: interactive)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Palette.ruleBg)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .padding(.horizontal, Metrics.cardMargin)
-        .padding(.top, 12)
-    }
-
-    private func recordCard(_ rec: (String, String, String, String, String, String)) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                EditableText(text: store[rec.0],
-                             font: .system(size: 17, weight: .semibold),
-                             color: Palette.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .editTap(rec.0, store[rec.0], enabled: interactive)
-
-                EditableText(text: store["rec.status"],
-                             font: .system(size: 13),
-                             color: Palette.green)
-                    .editTap("rec.status", store["rec.status"], enabled: interactive)
-            }
-            .padding(.bottom, 2)
-
-            infoRow("l.l.start", rec.1)
-            infoRow("l.l.end", rec.2)
-            infoRow("l.l.reason", rec.3)
-
-            Rectangle()
-                .fill(Palette.divider)
-                .frame(height: 1)
-                .padding(.vertical, 10)
-
-            HStack(spacing: 6) {
-                AvatarView(image: store.avatar, size: 22)
-                EditableText(text: store[rec.4], font: .system(size: 13), color: Palette.textValue)
-                    .editTap(rec.4, store[rec.4], enabled: interactive)
-                Spacer(minLength: 8)
-                EditableText(text: store[rec.5], font: .system(size: 13), color: Palette.textLabel)
-                    .editTap(rec.5, store[rec.5], enabled: interactive)
-            }
-        }
-        .padding(Metrics.cardPadding)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.white)
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+        .background(Palette.blueSoft)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    private func infoRow(_ labelKey: String, _ valueKey: String) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            EditableText(text: store[labelKey], font: Typo.label, color: Palette.textLabel)
-                .frame(width: Metrics.labelWidth, alignment: .leading)
-                .editTap(labelKey, store[labelKey], enabled: interactive)
+    private func recordCard(_ index: Int) -> some View {
+        let nameKey = "rec\(index).name"
+        let timeKey = "rec\(index).time"
+        let reasonKey = "rec\(index).reason"
+        let durKey = "rec\(index).dur"
+        let statusKey = "rec\(index).status"
 
-            EditableText(text: store[valueKey], font: Typo.value, color: Palette.textValue, lineSpacing: 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .editTap(valueKey, store[valueKey], enabled: interactive)
+        return Card(padding: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    EditableText(text: store[nameKey],
+                                 font: .system(size: 15, weight: .semibold),
+                                 color: Palette.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .editTap(nameKey, store[nameKey], enabled: interactive)
+
+                    EditableText(text: store[statusKey],
+                                 font: .system(size: 12, weight: .medium),
+                                 color: store.statusColor(for: statusKey))
+                        .editTap(statusKey, store[statusKey], enabled: interactive)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.textLabel)
+                }
+
+                EditableText(text: store[timeKey], font: .system(size: 12), color: Palette.textLabel)
+                    .editTap(timeKey, store[timeKey], enabled: interactive)
+
+                Divider().overlay(Palette.divider)
+
+                HStack(alignment: .top, spacing: 10) {
+                    EditableText(text: store[reasonKey], font: .system(size: 13), color: Palette.textValue)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .editTap(reasonKey, store[reasonKey], enabled: interactive)
+
+                    EditableText(text: store[durKey], font: .system(size: 12), color: Palette.textLabel)
+                        .editTap(durKey, store[durKey], enabled: interactive)
+                }
+            }
         }
-        .frame(minHeight: Metrics.rowHeight, alignment: .topLeading)
-        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if interactive { onOpenDetail() }
+        }
+    }
+
+    private var footer: some View {
+        HStack {
+            Spacer()
+            EditableText(text: store["rec.footer"], font: .system(size: 12), color: Palette.textLabel)
+                .editTap("rec.footer", store["rec.footer"], enabled: interactive)
+            Spacer()
+        }
+        .padding(.top, 14)
     }
 }
 
-// MARK: - 筛选弹层
+// MARK: - 筛选底部弹层
 
 struct FilterPanel: View {
     @ObservedObject var store: TextStore
-    @Binding var statusKey: String
-    let onClose: () -> Void
-    let onReset: () -> Void
-    let onConfirm: () -> Void
+    @Binding var selection: FilterSelection
+    var onClose: () -> Void = {}
+    var onConfirm: () -> Void = {}
 
     @Environment(\.editorCenter) private var editor
-
-    private let statuses = ["flt.s1", "flt.s2", "flt.s3", "flt.s4",
-                            "flt.s5", "flt.s6", "flt.s7", "flt.s8"]
-
-    init(store: TextStore,
-         statusKey: Binding<String>,
-         onClose: @escaping () -> Void,
-         onReset: @escaping () -> Void,
-         onConfirm: @escaping () -> Void) {
-        self.store = store
-        _statusKey = statusKey
-        self.onClose = onClose
-        self.onReset = onReset
-        self.onConfirm = onConfirm
-    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -205,186 +224,207 @@ struct FilterPanel: View {
                 .contentShape(Rectangle())
                 .onTapGesture { onClose() }
 
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(spacing: 0) {
                 header
+                Rectangle().fill(Palette.divider).frame(height: 0.5)
+
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        typeRow
-                        dateGroup("flt.start", "flt.date.a", "flt.date.b")
-                        dateGroup("flt.leave", "flt.date.c", "flt.date.d")
-                        durGroup
-                        statusGroup
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 14)
-                    .padding(.bottom, 8)
-                }
-                .frame(maxHeight: 430)
+                    VStack(alignment: .leading, spacing: 0) {
+                        section("flt.type")
+                        typeChips
 
-                HStack(spacing: 12) {
-                    Button {
-                        onReset()
-                    } label: {
-                        Text(store["flt.reset"])
-                            .font(.system(size: 15))
-                            .foregroundStyle(Palette.textValue)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 46)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .stroke(Palette.ghostBorder, lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
+                        section("flt.date1")
+                        rangeRow(sKey: "flt.d1.s", eKey: "flt.d1.e")
 
-                    Button {
-                        onConfirm()
-                    } label: {
-                        Text(store["flt.ok"])
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 46)
-                            .background(Palette.blue)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        section("flt.date2")
+                        rangeRow(sKey: "flt.d2.s", eKey: "flt.d2.e")
+
+                        section("flt.dur")
+                        durRow
+
+                        section("flt.status")
+                        statusChips
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 12)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-                .padding(.bottom, 20)
+                .frame(maxHeight: 520)
+
+                bottomBar
             }
-            .frame(maxWidth: .infinity)
             .background(Palette.white)
-            .clipShape(TopRoundedShape(radius: 16))
+            .clipShape(TopRoundedShape(radius: 18))
             .ignoresSafeArea(edges: .bottom)
-            .transition(.move(edge: .bottom))
         }
     }
 
     private var header: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                Text(store["flt.title"])
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Palette.textPrimary)
+        HStack {
+            Spacer()
+            EditableText(text: store["flt.title"], font: .system(size: 16, weight: .semibold), color: Palette.textPrimary)
+                .editTap("flt.title", store["flt.title"])
+            Spacer()
+            Button {
+                onClose()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Palette.textLabel)
+                    .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
-                    .onTapGesture { editor.begin(key: "flt.title", value: store["flt.title"]) }
-
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    Button {
-                        onClose()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Palette.textLabel)
-                            .frame(width: 40, height: 44)
-                    }
-                    .buttonStyle(.plain)
-                }
             }
-            .frame(height: 52)
-            .padding(.horizontal, 8)
-
-            Rectangle()
-                .fill(Palette.divider)
-                .frame(height: 1)
+            .buttonStyle(.plain)
         }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .frame(height: 52)
     }
 
-    private var typeRow: some View {
-        HStack(spacing: 8) {
-            labelText("flt.type")
+    private func section(_ key: String) -> some View {
+        EditableText(text: store[key], font: .system(size: 13, weight: .medium), color: Palette.textPrimary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .editTap(key, store[key])
+            .padding(.top, 16)
+            .padding(.bottom, 10)
+    }
+
+    private var typeChips: some View {
+        HStack(spacing: 10) {
+            ForEach(1...4, id: \.self) { index in
+                chip(key: "flt.type.\(index)",
+                     on: selection.type == index) {
+                    selection.type = index
+                }
+            }
             Spacer(minLength: 0)
-            EditableText(text: store["flt.type.value"], font: Typo.value, color: Palette.textValue)
-                .editTap("flt.type.value", store["flt.type.value"])
-            Image(systemName: "chevron.down")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Palette.textLabel)
-        }
-        .frame(height: 40)
-        .padding(.horizontal, 12)
-        .background(Palette.fieldBg)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-
-    private func dateGroup(_ titleKey: String, _ aKey: String, _ bKey: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            labelText(titleKey)
-            HStack(spacing: 8) {
-                box(aKey)
-                Text("~")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.textLabel)
-                box(bKey)
-            }
         }
     }
 
-    private var durGroup: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            labelText("flt.dur")
-            HStack(spacing: 8) {
-                box("flt.dur.a")
-                Text("~")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.textLabel)
-                box("flt.dur.b")
-            }
-        }
-    }
-
-    private var statusGroup: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            labelText("flt.status")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 78), spacing: 10)],
-                      alignment: .leading,
-                      spacing: 10) {
-                ForEach(statuses, id: \.self) { key in
-                    statusChip(key)
+    private var statusChips: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4),
+                  spacing: 10) {
+            ForEach(1...8, id: \.self) { index in
+                chip(key: "flt.s\(index)",
+                     on: selection.statuses.contains(index)) {
+                    if selection.statuses.contains(index) {
+                        selection.statuses.remove(index)
+                    } else {
+                        selection.statuses.insert(index)
+                    }
                 }
             }
         }
+        .padding(.bottom, 4)
     }
 
-    private func statusChip(_ key: String) -> some View {
-        let on = statusKey == key
-        return EditableText(text: store[key],
-                            font: .system(size: 13),
-                            color: on ? Palette.blue : Palette.textValue)
-            .padding(.horizontal, 6)
-            .frame(maxWidth: .infinity)
-            .frame(height: 30)
-            .background(on ? Palette.ruleBg : Palette.white)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    private func chip(key: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Text(store[key])
+            .font(.system(size: 13))
+            .foregroundStyle(on ? Palette.blue : Palette.textValue)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(on ? Palette.blueSoft : Palette.fieldBg)
+            .clipShape(Capsule())
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(on ? Palette.blue : Palette.ghostBorder, lineWidth: 1)
+                Capsule().stroke(on ? Palette.blue.opacity(0.45) : Color.clear, lineWidth: 0.8)
             )
-            .contentShape(Rectangle())
-            .onTapGesture { statusKey = key }
-            .onLongPressGesture(minimumDuration: 0.5) {
+            .contentShape(Capsule())
+            .onTapGesture { action() }
+            .onLongPressGesture(minimumDuration: 0.45) {
                 editor.begin(key: key, value: store[key])
             }
     }
 
-    private func labelText(_ key: String) -> some View {
-        EditableText(text: store[key], font: Typo.label, color: Palette.textLabel)
-            .editTap(key, store[key])
+    // 一组日期区间：开始日期 ~ 结束日期
+    private func rangeRow(sKey: String, eKey: String) -> some View {
+        HStack(spacing: 10) {
+            dateBox(key: sKey, caption: "flt.from")
+            Text("~")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.textLabel)
+            dateBox(key: eKey, caption: "flt.to")
+        }
     }
 
-    private func box(_ key: String) -> some View {
-        EditableText(text: store[key], font: Typo.value, color: Palette.textLabel, alignment: .center)
-            .frame(maxWidth: .infinity)
-            .frame(height: 36)
-            .background(Palette.fieldBg)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .editTap(key, store[key])
+    private func dateBox(key: String, caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            EditableText(text: store[caption], font: .system(size: 10), color: Palette.textLabel)
+                .editTap(caption, store[caption])
+            EditableText(text: store[key], font: .system(size: 13), color: Palette.textValue)
+                .editTap(key, store[key])
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.fieldBg)
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous))
+    }
+
+    // 时长区间：天 / 时 / 分
+    private var durRow: some View {
+        HStack(spacing: 10) {
+            durBox(key: "flt.dur.d", unitKey: "flt.unit.d")
+            durBox(key: "flt.dur.h", unitKey: "flt.unit.h")
+            durBox(key: "flt.dur.m", unitKey: "flt.unit.m")
+        }
+    }
+
+    private func durBox(key: String, unitKey: String) -> some View {
+        HStack(spacing: 4) {
+            EditableText(text: store[key], font: .system(size: 13), color: Palette.textValue)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .editTap(key, store[key])
+            EditableText(text: store[unitKey], font: .system(size: 11), color: Palette.textLabel)
+                .editTap(unitKey, store[unitKey])
+        }
+        .padding(.vertical, 9)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity)
+        .background(Palette.fieldBg)
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous))
+    }
+
+    private var bottomBar: some View {
+        HStack(spacing: 12) {
+            Text(store["flt.reset"])
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Palette.textValue)
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .background(Palette.fieldBg)
+                .clipShape(Capsule())
+                .contentShape(Capsule())
+                .onTapGesture {
+                    selection = FilterSelection()
+                    store.resetFilterFields()
+                }
+                .onLongPressGesture(minimumDuration: 0.45) {
+                    editor.begin(key: "flt.reset", value: store["flt.reset"])
+                }
+
+            Text(store["flt.ok"])
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .background(Palette.blue)
+                .clipShape(Capsule())
+                .contentShape(Capsule())
+                .onTapGesture { onConfirm() }
+                .onLongPressGesture(minimumDuration: 0.45) {
+                    editor.begin(key: "flt.ok", value: store["flt.ok"])
+                }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 8)
+        .padding(.bottom, 26)
+        .background(Palette.white)
     }
 }
 
-// MARK: - 记录页截图
+// MARK: - 截图用静态版
 
 struct CaptureRecords: View {
     @ObservedObject var store: TextStore
@@ -392,9 +432,12 @@ struct CaptureRecords: View {
     var body: some View {
         VStack(spacing: 0) {
             NavHeader(titleKey: "nav.record", title: store["nav.record"], showsBack: true)
-            RecordsBody(store: store, interactive: false)
-            HomeTabBar(store: store, selected: .records, interactive: false, onApply: {}, onRecord: {})
+            ScrollView(showsIndicators: false) {
+                RecordsBody(store: store, interactive: false)
+            }
+            HomeTabBar(store: store, selected: .records, interactive: false)
         }
         .background(Palette.pageBg)
+        .frame(width: Metrics.captureWidth)
     }
 }

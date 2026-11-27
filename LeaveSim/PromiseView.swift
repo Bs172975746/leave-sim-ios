@@ -2,7 +2,9 @@
 //  PromiseView.swift
 //  LeaveSim
 //
-//  请假安全承诺书页：四段承诺正文 + 勾选框 + 「不同意 / 同意并继续」。
+//  ③请假安全承诺书：四段正文 + 勾选框 + 不同意 / 同意并继续。
+//  勾选前「同意并继续」是灰色禁用态；勾上才变蓝，点了才进 ④申请表。
+//  流程：列表「发起」卡 → 本页 → 申请表 → 提交 → 回列表。
 //
 
 import SwiftUI
@@ -15,193 +17,185 @@ struct PromiseView: View {
     @State private var agreed = false
     @StateObject private var exporter = ShotExporter()
 
-    init(path: Binding<[AppRoute]>) {
-        _path = path
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             NavHeader(titleKey: "nav.promise",
                       title: store["nav.promise"],
                       showsBack: true,
                       onBack: { dismiss() },
-                      trailingIcons: ["camera"],
+                      trailing: [.symbol("camera")],
                       onTrailingTap: { _ in exporter.asking = true })
 
             ScrollView(showsIndicators: false) {
-                PromiseBody(store: store,
-                            interactive: true,
-                            agreed: $agreed)
+                PromiseBody(store: store, agreed: $agreed, interactive: true)
             }
 
-            bottomBar
+            PromiseBottomBar(store: store,
+                             agreed: agreed,
+                             interactive: true,
+                             onDecline: { dismiss() },
+                             onAgree: {
+                                 // 进申请表：把导航栈换成 [.form]，返回键直接回列表
+                                 path = [.form]
+                             })
         }
         .background(Palette.pageBg)
         .toolbar(.hidden, for: .navigationBar)
-        .shotExport(exporter, capture: { Shot.render(CapturePromise(store: store, agreed: agreed)) })
-    }
-
-    private var bottomBar: some View {
-        VStack(spacing: 0) {
-            Rectangle()
-                .fill(Palette.divider)
-                .frame(height: 1)
-
-            HStack(spacing: 12) {
-                Button {
-                    dismiss()
-                } label: {
-                    Text(store["pr.no"])
-                        .font(.system(size: 15))
-                        .foregroundStyle(Palette.textValue)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(Palette.ghostBorder, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    path.removeAll()
-                } label: {
-                    Text(store["pr.yes"])
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .background(Palette.blue)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .disabled(!agreed)
-                .opacity(agreed ? 1 : 0.4)
-            }
-            .padding(.horizontal, Metrics.cardMargin)
-            .padding(.top, 10)
-            .padding(.bottom, 16)
-        }
-        .background(Palette.white.ignoresSafeArea(edges: .bottom))
+        .navigationBarBackButtonHidden(true)
+        .shotExport(exporter, capture: {
+            Shot.render(CapturePromise(store: store, agreed: agreed))
+        })
     }
 }
 
-// MARK: - 正文
+// MARK: - 主体
 
 struct PromiseBody: View {
     @ObservedObject var store: TextStore
-    var interactive: Bool = true
     @Binding var agreed: Bool
-
-    @Environment(\.editorCenter) private var editor
+    var interactive: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             EditableText(text: store["pr.t"],
-                         font: .system(size: 14, weight: .semibold),
+                         font: Typo.sectionTitle,
                          color: Palette.textPrimary,
-                         lineSpacing: 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                         alignment: .center)
+                .frame(maxWidth: .infinity, alignment: .center)
                 .editTap("pr.t", store["pr.t"], enabled: interactive)
-                .padding(.bottom, 14)
+                .padding(.bottom, 16)
 
-            ForEach(["pr.1", "pr.2", "pr.3", "pr.4"], id: \.self) { key in
-                EditableText(text: store[key],
-                             font: .system(size: 13),
-                             color: Palette.textValue,
-                             lineSpacing: 4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .editTap(key, store[key], enabled: interactive)
-                    .padding(.bottom, 12)
+            VStack(alignment: .leading, spacing: 14) {
+                paragraph("pr.1")
+                paragraph("pr.2")
+                paragraph("pr.3")
+                paragraph("pr.4")
             }
 
-            Rectangle()
-                .fill(Palette.divider)
-                .frame(height: 1)
-                .padding(.vertical, 12)
+            Divider().overlay(Palette.divider).padding(.vertical, 18)
 
             checkRow
         }
-        .padding(Metrics.cardPadding)
+        .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.white)
         .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         .padding(.horizontal, Metrics.cardMargin)
-        .padding(.top, 12)
-        .padding(.bottom, 20)
+        .padding(.top, 13)
+        .padding(.bottom, 24)
+    }
+
+    private func paragraph(_ key: String) -> some View {
+        EditableText(text: store[key],
+                     font: .system(size: 13),
+                     color: Palette.textValue,
+                     lineSpacing: 6)
+            .editTap(key, store[key], enabled: interactive)
     }
 
     private var checkRow: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Button {
-                guard interactive else { return }
-                agreed.toggle()
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(agreed ? Palette.blue : Palette.white)
-                    Circle()
-                        .stroke(agreed ? Palette.blue : Palette.ghostBorder, lineWidth: 1)
-                    if agreed {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Color.white)
-                    }
+        HStack(alignment: .center, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(agreed ? Palette.blue : Color.clear)
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(agreed ? Palette.blue : Palette.ghostBorder, lineWidth: 1)
+                if agreed {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color.white)
                 }
-                .frame(width: 18, height: 18)
             }
-            .buttonStyle(.plain)
-            .padding(.top, 1)
+            .frame(width: 20, height: 20)
 
             EditableText(text: store["pr.check"],
                          font: .system(size: 13),
-                         color: Palette.textValue,
-                         lineSpacing: 3)
+                         color: Palette.textValue)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .editTap("pr.check", store["pr.check"], enabled: interactive)
+
+            Spacer(minLength: 0)
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            guard interactive else { return }
-            agreed.toggle()
+            if interactive {
+                withAnimation(.easeInOut(duration: 0.12)) { agreed.toggle() }
+            }
         }
     }
 }
 
-// MARK: - 承诺书截图
+// MARK: - 底部两个按钮
+
+struct PromiseBottomBar: View {
+    @ObservedObject var store: TextStore
+    var agreed: Bool = false
+    var interactive: Bool = true
+    var onDecline: () -> Void = {}
+    var onAgree: () -> Void = {}
+
+    @Environment(\.editorCenter) private var editor
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Palette.divider).frame(height: 0.5)
+            HStack(spacing: 12) {
+                Text(store["pr.no"])
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Palette.textValue)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(Palette.white)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Palette.ghostBorder, lineWidth: 1))
+                    .contentShape(Capsule())
+                    .onTapGesture {
+                        if interactive { onDecline() }
+                    }
+                    .onLongPressGesture(minimumDuration: 0.45) {
+                        guard interactive else { return }
+                        editor.begin(key: "pr.no", value: store["pr.no"])
+                    }
+
+                Text(store["pr.yes"])
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Color.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(agreed ? Palette.blue : Palette.disabled)
+                    .clipShape(Capsule())
+                    .contentShape(Capsule())
+                    .onTapGesture {
+                        guard interactive, agreed else { return }
+                        onAgree()
+                    }
+                    .onLongPressGesture(minimumDuration: 0.45) {
+                        guard interactive else { return }
+                        editor.begin(key: "pr.yes", value: store["pr.yes"])
+                    }
+            }
+            .padding(.horizontal, Metrics.cardMargin)
+            .padding(.vertical, 12)
+        }
+        .background(Palette.white)
+    }
+}
+
+// MARK: - 截图用静态版
 
 struct CapturePromise: View {
     @ObservedObject var store: TextStore
-    var agreed: Bool
+    var agreed: Bool = true
 
     var body: some View {
         VStack(spacing: 0) {
             NavHeader(titleKey: "nav.promise", title: store["nav.promise"], showsBack: true)
-            PromiseBody(store: store, interactive: false, agreed: .constant(agreed))
-            Spacer(minLength: 0)
-            HStack(spacing: 12) {
-                Text(store["pr.no"])
-                    .font(.system(size: 15))
-                    .foregroundStyle(Palette.textValue)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(Palette.ghostBorder, lineWidth: 1)
-                    )
-                Text(store["pr.yes"])
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(agreed ? Palette.blue : Palette.textLabel)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            ScrollView(showsIndicators: false) {
+                PromiseBody(store: store, agreed: .constant(agreed), interactive: false)
             }
-            .padding(.horizontal, Metrics.cardMargin)
-            .padding(.top, 10)
-            .padding(.bottom, 16)
-            .background(Palette.white)
+            PromiseBottomBar(store: store, agreed: agreed, interactive: false)
         }
         .background(Palette.pageBg)
+        .frame(width: Metrics.captureWidth)
     }
 }

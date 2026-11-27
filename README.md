@@ -1,7 +1,8 @@
 # 请假模拟器 · iOS 版（LeaveSim）
 
-纯本地 SwiftUI 工程：没有网络、没有后端、没有第三方依赖，用来生成 / 编辑一张「请假详情」截图。
-所有页面上的文字都能点开改、改完立刻写进 `UserDefaults`，杀掉 App 重启仍在。
+纯本地 SwiftUI 工程：没有网络、没有后端、没有第三方依赖，用来复刻 Android 版「请假」小程序的
+**六个页面**（列表 / 详情 / 承诺书 / 申请表 / 记录 / 筛选），所有页面上的文字都能点开改、
+改完立刻写进 `UserDefaults`，杀掉 App 重启仍在。
 
 Android 版在 `D:\dsh\work\leave-app`（Kotlin/Java + XML 布局）。本工程是它的 iOS 对等版本：
 字段、文案、配色、行高、标签列宽、下划线尺寸都照搬 Android 版。
@@ -34,8 +35,19 @@ leave-ios/
 │   ├── RecordsView.swift                   # 请假记录 + 筛选底部弹层
 │   ├── PromiseView.swift                   # 请假安全承诺书
 │   ├── Wheels.swift                        # 日期 / 时间三列滚轮
-│   └── Assets.xcassets/                    # AppIcon（1024 图标）+ AccentColor #1F61EB
+│   └── Assets.xcassets/                    # AppIcon（1024 图标）+ AccentColor + 8 个矢量图 imageset
+│       ├── AppIcon.appiconset/             # 1024（蓝色「今日校园」底图）
+│       ├── TabLeaveActive.imageset/        # 底部 tab·请假·选中（蓝）
+│       ├── TabLeaveInactive.imageset/      # 底部 tab·请假·未选（灰）
+│       ├── TabRecordActive.imageset/       # 底部 tab·记录·选中（蓝）
+│       ├── TabRecordInactive.imageset/     # 底部 tab·记录·未选（灰）
+│       ├── IconFilterActive.imageset/      # 筛选·已生效（蓝漏斗）
+│       ├── IconFilterInactive.imageset/    # 筛选·未生效（灰漏斗）
+│       ├── IconMore.imageset/              # 详情页「更多」（三道横杠）
+│       └── IconJoin.imageset/              # 发起卡蓝圈人形（115×115 原图，唯一彩色位图）
 ├── tools/make_icon.py                      # 生成 1024 AppIcon 的脚本（已跑过，图标已生成）
+├── tools/make_assets.py                    # 把 Android 的 SVG / PNG 烤成上面那 8 个 imageset
+├── tools/check_project.py                  # 静态自检：括号配对 / key 覆盖 / 图标 / pbxproj
 └── README.md
 ```
 
@@ -248,3 +260,155 @@ enum Shot {
 工程里所有姓名、手机号、地址、学校、审批人全部是虚构占位数据：
 王小明 / 13800001234 / 13900005678 / 示例省示例市示例区示例路88号 / 示例小区3号楼 /
 辅导员 李老师 / 示例大学。不含任何真实个人信息。
+
+---
+
+## 十三、与 Android 版对齐（第 3 轮）
+
+前三轮：**第 1 轮**单页截图版（只有一张请假详情）→ **第 2 轮**六页雏形（页面齐了但跳转顺序、
+联动、图标都不对）→ **第 3 轮（本轮）**按 Android 版逐条对齐：六页重排、全文字可编辑、
+详情 ↔ 列表双向联动、时长自动重算、状态自动配色、图标全部换成 Android 的原图。
+
+> ⚠️ **本机无 macOS 未编译验证**：改完只用 `tools/check_project.py` 做了静态自检
+> （括号配对 / 文案 key 覆盖 / 图标资源 / pbxproj 结构），没有跑过 `xcodebuild`。
+> 首次在 Xcode 里 `⌘R` 仍可能遇到一两条编译期报错，见第十一节的排查清单。
+
+### 1. 六个页面分别在哪
+
+| # | 页面 | 文件 | 入口 / 关键类型 |
+|---|---|---|---|
+| ① | 请假列表 | `LeaveSim/HomeView.swift` | `HomeView`、`HomeBody`、`HomeTabBar`、`CaptureHome` |
+| ② | 请假详情 / 续假 | `LeaveSim/DetailView.swift` | `DetailView`、`DetailTabStrip`、`DetailContent`、`DetailBottomBar`、`RuleStrip` |
+| ③ | 请假安全承诺书 | `LeaveSim/PromiseView.swift` | `PromiseView`、`PromiseBody`、`PromiseBottomBar` |
+| ④ | 请假申请表 | `LeaveSim/FormView.swift` | `FormView`、`FormBody`、`FormRow`、`FormSubmitBar` |
+| ⑤ | 请假记录 | `LeaveSim/RecordsView.swift` | `RecordsView`、`RecordsBody`、`CaptureRecords` |
+| ⑥ | 筛选底部弹层 | `LeaveSim/RecordsView.swift` | `FilterPanel`、`FilterSelection` |
+
+六个页面共用 `Theme.swift` 里的原子组件（`Card` / `EditableText` / `InfoRow` / `AvatarView` /
+`RuleStrip` / `NavHeader` / `ArtIcon` / `ArtImage`）与 `Models.swift` 里的 `TextStore`。
+
+### 2. 流程顺序（承诺书在表单前面）
+
+```
+列表页「发起」三卡（其它 / 事假 / 病假）
+   → path.append(.promise)           HomeView.start(_:)
+   → 承诺书勾选「同意并继续」
+   → path = [.form]                  PromiseView（把栈换成 [.form]，返回键直接回列表）
+   → 申请表填完点「提交」
+   → store.commitForm() + path.removeAll()
+   → 回到列表，进行中卡片就是刚填的内容
+```
+
+承诺书没勾选时「同意并继续」是灰底（`Palette.disabled`）且点不动——
+`PromiseBottomBar` 里 `background(agreed ? Palette.blue : Palette.disabled)`，
+`onTapGesture` 首行 `guard agreed else { return }`，不是靠 `.opacity` 假禁用。
+
+### 3. 全文字可编辑（点一下弹「修改文字」）
+
+- 组件：`LeaveSim/EditSheet.swift` 的 `EditTap` + `EditorCenter` + `EditPanel`；
+  任何文字外面套 `.editTap("q.reason", store["q.reason"])` 就变成可点的。
+- 浮层：点字 → 底部弹「修改文字」+ 多行 `TextField` + 取消 / 确定 → 确定即调
+  `TextStore.set(key, value)` 写进 `UserDefaults`。
+- **点字优先**：`EditTap` 用的是 `.highPriorityGesture`，所以在「整卡可点进详情」的
+  进行中卡片上，点卡片空白处进详情、点具体那行字是改字，不会互相抢。
+- 例外（诚实说明）：筛选弹层里的状态 chip、抄送人 chip、以及「撤销请假」「提交」这类
+  按钮，**点 = 触发动作、长按 0.45 秒 = 改字**——chip 的文字几乎占满整个面，
+  点字改字会让它没法被选中；`InfoRow` / `FormRow` 给了 `valueAction` 的行同理
+  （如「是否离校」点一下是切换 是/否，长按才是改字）。
+
+### 4. 自动保存与 key 对齐
+
+`Models.swift` 的 `TextStore` 是唯一数据源：
+
+- `static let fields` 里 **168 条** `(key, 默认值)`，key 与 Android 版一一对应：
+  `q.start/q.end/q.dur/q.course/q.reason/q.student/q.proof/q.place`、
+  `d.left/d.dest/d.addr/d.emerg/d.tel`、`a.who/a.res/a.time/a.note`、
+  `hd.name/hd.status`、`hm.name/hm.status/hm.v1/hm.v2/hm.v3/hm.who/hm.time`。
+- `set(_:_:)` 每次都同时写内存字典与 `UserDefaults`；`init()` 启动时先从
+  `UserDefaults` 覆盖默认值（所以杀进程重启还是改过的值），并把缺失的 key 补写回去。
+- 「恢复默认文字」= `resetAll()`（只删本工程的 key，不动别的 App）；
+  筛选弹层的「重置」= `resetFilterFields()`，只重置 `flt.*`。
+
+### 5. 联动（详情 ↔ 列表 ↔ 表单共用一份 key）
+
+- 详情页改 `q.*` → 列表「进行中」卡片读的是同一批 key（`InfoRow(labelKey:valueKey:)`
+  两边都指向 `q.start` / `q.end` / `q.reason` / `q.dur` / `q.student` / `q.submit`），
+  所以列表自动跟着变；反过来在列表卡片上改字写的也是这同一批 key，
+  不存在「列表改了、下次同步被详情覆盖」的问题——压根没有第二份数据。
+- 改起止时间自动重算时长：`TextStore.set` 里 `q.start` / `q.end` /
+  `f.start` / `f.end` 会触发 `refreshDuration(prefix:)`，用 `TimeFmt.minutes(from:to:)`
+  算分钟差再 `TimeFmt.durationText(_:)` 拼成「X天X时X分」（不足一天时退化成「X时X分」），
+  直接覆盖 `q.dur` / `f.dur`。
+- 状态自动配色：`Theme.swift` 的 `StatusTone.color(_:)`，
+  已通过 / 已完成 / 即将休假 → 绿 `#40C59C`；审批中 / 待审批 → 蓝 `#2561EF`；
+  已驳回 / 已撤销 / 逾期 → 灰 `#999999`。凡是显示状态的地方（列表卡、详情头、
+  审批流程、记录卡）都过这个函数，改状态文字颜色立刻跟着变。
+- 提交后的联动：`commitForm()` 把 `f.*` 写回 `q.*` / `d.*`，把
+  `hd.status`、`a.res` 置「审批中」，`q.submit` 写当前时间戳，`hd.name` 改成
+  「（提交人）的请假申请」，于是回列表就能看到一张新的进行中卡片。
+
+### 6. 视觉对齐的数值落点（都在 `Theme.swift`）
+
+| 项 | 值 | 落点 |
+|---|---|---|
+| 页面底色 | `#F3F7FF` | `Palette.pageBg` |
+| 卡片 / 主色 / 标签灰 / 错误红 / 输入框底 | `#FFFFFF` / `#2561EF` / `#999999` / `#EE0A24` / `#F7F8FA` | `Palette.white` / `blue` / `textLabel` / `error` / `fieldBg` |
+| 状态绿 | `#40C59C` | `Palette.green` |
+| 导航高 / 标题 / 返回图标 | 48pt / 19pt 纯黑居中 / 20pt 细 chevron（1.9 描边） | `Metrics.navHeight`、`Typo.navTitle`、`NavHeader` |
+| 详情行高 / 标签列 | 35pt / 103pt | `Metrics.rowHeight`、`Metrics.labelWidth`、`InfoRow` |
+| 卡片左右 / 卡片间隙 / 圆角 | 22pt / 13pt / 12pt | `Metrics.cardMargin`、`cardSpacing`、`cardRadius` |
+| 小节标题 / 正文 | 17pt bold / 13pt | `Typo.sectionTitle`、`Typo.value` |
+| 表单行距 / 标签列 | 46pt / 108pt | `Metrics.formRowPitch`、`formLabelWidth`、`FormRow` |
+| 必填星号 / 缺项提示 | 红 `#EE0A24`，提示在值下方 11pt 红字 | `FormRow(required:)`、`store.requiredHint(key)` |
+
+### 7. 图标怎么来的
+
+`tools/make_assets.py` 一次性把 Android 版的图标烤进 `Assets.xcassets`：
+
+1. 7 个 SVG（`cpdaily/svg/` 下的 tab ×4、筛选 ×2、更多 ×1）用 **Edge 无头截图**转 PNG
+   （本机没有 ImageMagick / cairosvg / resvg；`msedge --headless=new --screenshot` +
+   透明背景 + 4× 分辨率），再按 alpha 外接框裁边、留 1px 边距。
+2. `leave-app/res/drawable-nodpi/ic_join.png` 原样拷进 `IconJoin.imageset`（唯一彩色位图）。
+3. `cpdaily/asset_icon640.png`（192×192）用 LANCZOS 放大到 1024 写进 `AppIcon.appiconset`。
+
+生成的 imageset：`TabLeaveActive/TabLeaveInactive/TabRecordActive/TabRecordInactive/
+IconFilterActive/IconFilterInactive/IconMore/IconJoin`，每个都是 single-scale +
+`"template-rendering-intent": "template"`（`IconJoin` 除外，它是彩色位图）。
+颜色一律由代码给（`ArtIcon(name:tint:)` 走 `.renderingMode(.template)`），
+所以选中 / 未选只换 tint，不用维护两套颜色。
+
+### 8. 本轮改动文件
+
+`LeaveSim/Theme.swift`、`LeaveSim/Models.swift`、`LeaveSim/HomeView.swift`、
+`LeaveSim/DetailView.swift`、`LeaveSim/FormView.swift`、`LeaveSim/PromiseView.swift`、
+`LeaveSim/RecordsView.swift`（七个文件整体重写）、`LeaveSim/EditSheet.swift`（EditTap 改高优先级手势）、
+`LeaveSim/Assets.xcassets`（新增 8 个 imageset + 替换 AppIcon 1024）、
+`tools/make_assets.py`、`tools/check_project.py`、`README.md`。
+`LeaveSimApp.swift`、`Wheels.swift`、`Shot.swift`、`project.pbxproj` 没有改动——
+新图标都是 asset catalog 内部文件，pbxproj 里 `Assets.xcassets` 本来就整体挂在 Resources，
+不需要新增 `PBXFileReference`。
+
+### 9. 本轮仍然没做到的（诚实清单）
+
+- **没有编译验证**：本机没有 macOS / Xcode，`xcodebuild` 一次都没跑过，Swift 代码**一行都没被编译器看过**。
+  只做了静态检查：11 个文件的括号配对、168 条文案 key 的引用覆盖（`store["key"]` / `editTap("key")` /
+  `labelKey` / `valueKey` 字面量都在 `fields` 里登记；另有 46 个 key 是通过变量或字符串拼接引用的，
+  如 `f.cc.\(index)`、`flt.d1.s`、`rec\(i).name`，静态扫描看不到，个别可能确实没用到）、
+  8 个 imageset 与 Contents.json、pbxproj 的括号 / 分号配对与文件存在性。语义上都是 iOS 16 API，
+  但首次编译仍可能要修（见第十一节的清单）。
+- **图标是位图不是矢量**：SVG 转成了 4× PNG，没有用 `"preserves-vector-representation": true`
+  ——因为「SVG 进 asset catalog」这条路在没有 Xcode 的情况下无法验证，
+  万一 Xcode 版本不认会直接丢图。位图在 1x/2x/3x 下都够清晰（4 倍分辨率），
+  但放大到很大尺寸会糊。
+- **px 级近似**：详情页行高 35 / 标签列 103、表单行距 46 / 标签列 108 都是按 Android 的
+  dp 直接当 pt 用，文字基线、行间距这类没有逐像素比对过；承诺书四段的行距是 6pt。
+- **滚动位置 / 弹层动画**：只做了 `.move(edge: .bottom)` + 0.22s 的近似，没对齐具体的
+  缓动曲线与遮罩透明度曲线（遮罩用的是 0.35 黑）。
+- **chips / 按钮改为长按改字**（见第 3 节的例外说明），没有真正做到「所有文字都是点一下」。
+- **筛选只是视觉筛选**：`FilterSelection` 只改统计条上的计数文案，`rec1..3` 三张卡片的
+  内容不会被真的过滤掉（本来就是三条静态占位数据）。
+- **「撤销请假」只改 `hd.status` / `a.res`**（列表进行中卡片与详情页同步变灰），
+  请假记录页那三张 `rec1..3` 卡片是独立字段，不会跟着变。
+- **`project.yml`（XcodeGen 备用）没动但也不需要动**：它用 `sources: - path: LeaveSim`
+  整目录纳入编译，图标又在 asset catalog 内部，所以两条工程描述都还是完整的；
+  真正列文件的是手写的 `project.pbxproj`，本轮没新增 `.swift` 文件正是为了不动它。
