@@ -258,6 +258,8 @@ enum Metrics {
     static let promiseButtonTop: CGFloat  = 6
     static let promiseButtonBottom: CGFloat = 14
     static let submitPadV: CGFloat        = 10    // 提交栏上下
+    static let designWidth: CGFloat       = 411      // 原版逻辑宽（1206px / 2.931）
+    static let designHeight: CGFloat      = 894.6    // 原版逻辑高（2622px / 2.931）
     static let captureWidth: CGFloat      = 411      // 与原版一致：1206px / 2.931
     static let captureHeight: CGFloat     = 894.6    // 原版 2622px / 2.931
     static let captureScale: CGFloat      = 2.931      // 与原版一致：1206px / 2.931

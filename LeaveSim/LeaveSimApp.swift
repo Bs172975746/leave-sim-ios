@@ -36,22 +36,33 @@ struct RootView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            NavigationStack(path: $path) {
-                HomeView(path: $path)
-                    .navigationDestination(for: AppRoute.self) { route in
-                        switch route {
-                        case .detail:
-                            DetailView()
-                        case .form:
-                            FormView(path: $path)
-                        case .records:
-                            RecordsView(path: $path)
-                        case .promise:
-                            PromiseView(path: $path)
+            // 整个界面按原版逻辑尺寸（411 × 894.6）排一次，再等比缩到本机屏幕。
+            // 这样系统截图里的每个元素位置都和原版截图成同一比例，不会因为
+            // iPhone 屏比原版矮 20pt 而把「没有更多数据了~」挤到 tab 栏上。
+            GeometryReader { geo in
+                let scale = min(geo.size.width / Metrics.designWidth,
+                                geo.size.height / Metrics.designHeight)
+                NavigationStack(path: $path) {
+                    HomeView(path: $path)
+                        .navigationDestination(for: AppRoute.self) { route in
+                            switch route {
+                            case .detail:
+                                DetailView()
+                            case .form:
+                                FormView(path: $path)
+                            case .records:
+                                RecordsView(path: $path)
+                            case .promise:
+                                PromiseView(path: $path)
+                            }
                         }
-                    }
+                }
+                .environment(\.editorCenter, editor)
+                .frame(width: Metrics.designWidth, height: Metrics.designHeight)
+                .scaleEffect(scale, anchor: .center)
+                .frame(width: geo.size.width, height: geo.size.height)
             }
-            .environment(\.editorCenter, editor)
+            .ignoresSafeArea()
             .zIndex(0)
 
             if let target = editor.target {
