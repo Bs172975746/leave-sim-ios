@@ -108,15 +108,15 @@ final class TextStore: ObservableObject {
         // ── 导航标题
         ("nav.home",    "请假"),
         ("nav.detail",  "请假详情"),
-        ("nav.form",    "发起请假"),
-        ("nav.record",  "请假记录"),
+        ("nav.form",    "请假"),
+        ("nav.record",  "请假"),
         ("nav.promise", "请假安全承诺书"),
 
         // ── 列表页
         ("list.active", "进行中"),
-        ("list.start",  "发起请假"),
+        ("list.start",  "发起"),
         ("list.more",   "更多"),
-        ("revoke",      "撤销请假"),
+        ("revoke",      "撤销请假申请"),
         ("list.footer", "没有更多数据了~"),
         ("list.type.1", "其它"),
         ("list.type.2", "事假"),
@@ -134,7 +134,7 @@ final class TextStore: ObservableObject {
         ("sec.dest",  "请假去向"),
         ("sec.approval", "审批流程"),
         ("sec.xj",    "续假信息"),
-        ("hd.name",   "王小明的请假申请"),
+        ("hd.name",   "王小明的其它"),
         ("hd.status", "审批中"),
         ("q.student", "王小明"),
         ("q.start",   "2026-11-30 08:00"),
@@ -153,7 +153,7 @@ final class TextStore: ObservableObject {
         ("l.q.course",  "课程"),
         ("l.q.reason",  "请假原因"),
         ("l.q.proof",   "证明材料"),
-        ("l.q.place",   "请假地点"),
+        ("l.q.place",   "发起位置"),
 
         ("d.left",  "是"),
         ("d.dest",  "回家"),
@@ -206,14 +206,14 @@ final class TextStore: ObservableObject {
         ("pr.yes",   "同意并继续"),
 
         // ── 申请表
-        ("f.hd.title", "请假申请"),
-        ("f.start",    "请选择开始时间"),
-        ("f.end",      "请选择结束时间"),
-        ("f.dur",      "0时0分"),
-        ("f.course",   "请填写课程"),
-        ("f.reason",   "请填写请假原因（不超过1000字）"),
-        ("f.proof",    "点击上传证明材料"),
-        ("f.place",    "请填写请假地点"),
+        ("f.hd.title", "其它"),
+        ("f.start",    "请选择"),
+        ("f.end",      "请选择"),
+        ("f.dur",      "天/时/分"),
+        ("f.course",   ""),
+        ("f.reason",   "请输入"),
+        ("f.proof",    "请上传证明材料"),
+        ("f.place",    "需要您授权移动APP平台位置信息，以便使用此功能"),
         ("f.left",     "是"),
         ("f.dest",     "请填写去向"),
         ("f.addr",     "请填写详细地址"),
@@ -228,7 +228,7 @@ final class TextStore: ObservableObject {
         ("l.f.start",  "开始时间"),
         ("l.f.end",    "结束时间"),
         ("l.f.dur",    "请假时长"),
-        ("l.f.course", "课程"),
+        ("l.f.course", "影响课程"),
         ("l.f.reason", "请假原因"),
         ("l.f.proof",  "证明材料"),
         ("l.f.place",  "请假地点"),
@@ -323,6 +323,16 @@ final class TextStore: ObservableObject {
                 seed[key] = saved
             }
         }
+        // 旧版本把标题存成「王小明的请假申请」，安卓版只显示「王小明的其它」：
+        // 启动时把尾部的「申请」去掉，换成当前假别（其它 / 事假 / 病假）。
+        let kind = (seed["f.hd.title"] ?? "").isEmpty ? "其它" : seed["f.hd.title"]!
+        if var name = seed["hd.name"], name.hasSuffix("申请") {
+            if name.hasSuffix("请假申请") { name = String(name.dropLast(4)) }
+            else { name = String(name.dropLast(2)) }
+            if name.hasSuffix("的") { name += kind }
+            seed["hd.name"] = name
+        }
+
         self.values = seed
         self.avatar = TextStore.loadImage(.avatar)
         self.proof = TextStore.loadImage(.proof)
@@ -390,17 +400,28 @@ final class TextStore: ObservableObject {
 
     // MARK: 表单校验
 
-    private static let blankValues: Set<String> = ["", "-", "—", "请选择", "请选择开始时间", "请选择结束时间", "请填写", "点击填写"]
+    private static let blankValues: Set<String> = ["", "-", "—", "请选择", "请选择开始时间", "请选择结束时间",
+                                                   "请填写", "点击填写", "请输入", "天/时/分", "请上传证明材料"]
 
     func isFilled(_ key: String) -> Bool {
         let v = self[key].trimmingCharacters(in: .whitespacesAndNewlines)
         if TextStore.blankValues.contains(v) { return false }
         if v.hasPrefix("请填写") || v.hasPrefix("请选择") || v.hasPrefix("点击上传") { return false }
+        if v.hasPrefix("请输入") || v.hasPrefix("需要您授权") || v.hasPrefix("请上传") { return false }
         return true
     }
 
     /// 表单必填项（顺序即提示顺序）
     static let requiredFormKeys = ["f.start", "f.end", "f.course", "f.reason", "f.place"]
+
+    /// 缺失项的红字：安卓版每种字段的提示语不一样（请选择 / 请输入）
+    static let requiredHintText: [String: String] = [
+        "f.start": "请选择",
+        "f.end": "请选择",
+        "f.course": "请输入",
+        "f.reason": "请输入",
+        "f.place": "请选择"
+    ]
 
     func requiredHint(_ key: String) -> String {
         "f.hint." + key
@@ -414,7 +435,8 @@ final class TextStore: ObservableObject {
             missing.append(key)
         }
         for key in TextStore.requiredFormKeys {
-            set(requiredHint(key), missing.contains(key) ? self["f.hint"] : "")
+            let text = missing.contains(key) ? (TextStore.requiredHintText[key] ?? self["f.hint"]) : ""
+            set(requiredHint(key), text)
         }
         return missing.count
     }
@@ -438,7 +460,8 @@ final class TextStore: ObservableObject {
         set("q.submit", TimeFmt.stamp() + " 提交")
 
         let name = self["q.student"].isEmpty ? "王小明" : self["q.student"]
-        set("hd.name", name + "的请假申请")
+        let kind = self["f.hd.title"].isEmpty ? "其它" : self["f.hd.title"]
+        set("hd.name", name + "的" + kind)
     }
 
     /// 把详情页的当前内容灌进表单，作为「再次发起」的初值。

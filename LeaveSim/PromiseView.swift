@@ -2,9 +2,9 @@
 //  PromiseView.swift
 //  LeaveSim
 //
-//  ③请假安全承诺书：四段正文 + 勾选框 + 不同意 / 同意并继续。
-//  勾选前「同意并继续」是灰色禁用态；勾上才变蓝，点了才进 ④申请表。
-//  流程：列表「发起」卡 → 本页 → 申请表 → 提交 → 回列表。
+//  ③请假安全承诺书：纯白底、正文 15pt / 行距 2 / 段间距 18、
+//  左右留白 40、首行缩进两个字（全角空格），底部勾选行 + 不同意 / 同意并继续。
+//  数值对齐 screen_promise.xml。
 //
 
 import SwiftUI
@@ -19,27 +19,30 @@ struct PromiseView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            NavHeader(titleKey: "nav.promise",
-                      title: store["nav.promise"],
+            NavHeader(store: store,
+                      titleKey: "nav.promise",
                       showsBack: true,
-                      onBack: { dismiss() },
-                      trailing: [.symbol("camera")],
-                      onTrailingTap: { _ in exporter.asking = true })
+                      onBack: { dismiss() })
+
+            Rectangle()
+                .fill(Palette.divider)
+                .frame(height: 1)
 
             ScrollView(showsIndicators: false) {
                 PromiseBody(store: store, agreed: $agreed, interactive: true)
             }
 
+            Rectangle()
+                .fill(Palette.divider)
+                .frame(height: 1)
+
             PromiseBottomBar(store: store,
-                             agreed: agreed,
+                             agreed: $agreed,
                              interactive: true,
                              onDecline: { dismiss() },
-                             onAgree: {
-                                 // 进申请表：把导航栈换成 [.form]，返回键直接回列表
-                                 path = [.form]
-                             })
+                             onAgree: { path = [.form] })
         }
-        .background(Palette.pageBg)
+        .background(Palette.white)
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .shotExport(exporter, capture: {
@@ -48,88 +51,38 @@ struct PromiseView: View {
     }
 }
 
-// MARK: - 主体
+// MARK: - 正文
 
 struct PromiseBody: View {
     @ObservedObject var store: TextStore
     @Binding var agreed: Bool
     var interactive: Bool = true
 
+    private let paragraphs = ["pr.1", "pr.2", "pr.3", "pr.4"]
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            EditableText(text: store["pr.t"],
-                         font: Typo.sectionTitle,
-                         color: Palette.textPrimary,
-                         alignment: .center)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .editTap("pr.t", store["pr.t"], enabled: interactive)
-                .padding(.bottom, 16)
-
-            VStack(alignment: .leading, spacing: 14) {
-                paragraph("pr.1")
-                paragraph("pr.2")
-                paragraph("pr.3")
-                paragraph("pr.4")
-            }
-
-            Divider().overlay(Palette.divider).padding(.vertical, 18)
-
-            checkRow
-        }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.white)
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
-        .padding(.horizontal, Metrics.cardMargin)
-        .padding(.top, 13)
-        .padding(.bottom, 24)
-    }
-
-    private func paragraph(_ key: String) -> some View {
-        EditableText(text: store[key],
-                     font: .system(size: 13),
-                     color: Palette.textValue,
-                     lineSpacing: 6)
-            .editTap(key, store[key], enabled: interactive)
-    }
-
-    private var checkRow: some View {
-        HStack(alignment: .center, spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(agreed ? Palette.blue : Color.clear)
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .stroke(agreed ? Palette.blue : Palette.ghostBorder, lineWidth: 1)
-                if agreed {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Color.white)
-                }
-            }
-            .frame(width: 20, height: 20)
-
-            EditableText(text: store["pr.check"],
-                         font: .system(size: 13),
-                         color: Palette.textValue)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .editTap("pr.check", store["pr.check"], enabled: interactive)
-
-            Spacer(minLength: 0)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if interactive {
-                withAnimation(.easeInOut(duration: 0.12)) { agreed.toggle() }
+        VStack(alignment: .leading, spacing: Metrics.promiseParaGap) {
+            ForEach(paragraphs, id: \.self) { key in
+                Text("　　" + store[key])
+                    .font(Typo.body)
+                    .foregroundStyle(Palette.textValue)
+                    .lineSpacing(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .editTap(key, store[key], enabled: interactive)
             }
         }
+        .padding(.horizontal, Metrics.promisePad)
+        .padding(.top, Metrics.promiseTop)
+        .padding(.bottom, Metrics.promisePadBottom)
     }
 }
 
-// MARK: - 底部两个按钮
+// MARK: - 底部勾选 + 两个按钮
 
 struct PromiseBottomBar: View {
     @ObservedObject var store: TextStore
-    var agreed: Bool = false
+    @Binding var agreed: Bool
     var interactive: Bool = true
     var onDecline: () -> Void = {}
     var onAgree: () -> Void = {}
@@ -138,17 +91,41 @@ struct PromiseBottomBar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Rectangle().fill(Palette.divider).frame(height: 0.5)
-            HStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 0) {
+                CheckMark(on: agreed)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard interactive else { return }
+                        agreed.toggle()
+                    }
+
+                EditableText(text: store["pr.check"],
+                             font: Typo.agree,
+                             color: Palette.textPrimary,
+                             lineSpacing: 3)
+                    .padding(.leading, Metrics.checkGap)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .editTap("pr.check", store["pr.check"], enabled: interactive)
+            }
+            .padding(.horizontal, Metrics.promisePad)
+            .padding(.top, Metrics.promiseCheckTop)
+            .padding(.bottom, Metrics.promiseCheckBottom)
+
+            HStack(spacing: 0) {
                 Text(store["pr.no"])
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(Palette.textValue)
+                    .font(Typo.sheetButton)
+                    .foregroundStyle(Palette.textPrimary)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(Palette.white)
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(Palette.ghostBorder, lineWidth: 1))
-                    .contentShape(Capsule())
+                    .frame(height: Metrics.bigButton)
+                    .background(
+                        RoundedRectangle(cornerRadius: Metrics.smallRadius, style: .continuous)
+                            .fill(Palette.white)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Metrics.smallRadius, style: .continuous)
+                            .strokeBorder(Palette.outline, lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
                     .onTapGesture {
                         if interactive { onDecline() }
                     }
@@ -158,24 +135,28 @@ struct PromiseBottomBar: View {
                     }
 
                 Text(store["pr.yes"])
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.white)
+                    .font(Typo.sheetButton)
+                    .foregroundStyle(Palette.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(agreed ? Palette.blue : Palette.disabled)
-                    .clipShape(Capsule())
-                    .contentShape(Capsule())
+                    .frame(height: Metrics.bigButton)
+                    .background(
+                        RoundedRectangle(cornerRadius: Metrics.smallRadius, style: .continuous)
+                            .fill(agreed ? Palette.blue : Palette.disabled)
+                    )
+                    .contentShape(Rectangle())
+                    .padding(.leading, Metrics.fwdGap)
                     .onTapGesture {
-                        guard interactive, agreed else { return }
-                        onAgree()
+                        guard interactive else { return }
+                        if agreed { onAgree() }
                     }
                     .onLongPressGesture(minimumDuration: 0.45) {
                         guard interactive else { return }
                         editor.begin(key: "pr.yes", value: store["pr.yes"])
                     }
             }
-            .padding(.horizontal, Metrics.cardMargin)
-            .padding(.vertical, 12)
+            .padding(.horizontal, Metrics.promisePad)
+            .padding(.top, Metrics.promiseButtonTop)
+            .padding(.bottom, Metrics.promiseButtonBottom)
         }
         .background(Palette.white)
     }
@@ -185,17 +166,19 @@ struct PromiseBottomBar: View {
 
 struct CapturePromise: View {
     @ObservedObject var store: TextStore
-    var agreed: Bool = true
+    var agreed: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
-            NavHeader(titleKey: "nav.promise", title: store["nav.promise"], showsBack: true)
+            NavHeader(store: store, titleKey: "nav.promise", showsBack: true)
+            Rectangle().fill(Palette.divider).frame(height: 1)
             ScrollView(showsIndicators: false) {
                 PromiseBody(store: store, agreed: .constant(agreed), interactive: false)
             }
-            PromiseBottomBar(store: store, agreed: agreed, interactive: false)
+            Rectangle().fill(Palette.divider).frame(height: 1)
+            PromiseBottomBar(store: store, agreed: .constant(agreed), interactive: false)
         }
-        .background(Palette.pageBg)
+        .background(Palette.white)
         .frame(width: Metrics.captureWidth)
     }
 }

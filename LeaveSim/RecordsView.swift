@@ -2,8 +2,9 @@
 //  RecordsView.swift
 //  LeaveSim
 //
-//  ⑤请假记录：统计条 + 卡片列表 + 筛选入口 + 底部 tab；
-//  ⑥筛选底部弹层：请假类型、两组日期区间、时长区间、8 个状态 chip、重置 / 确定。
+//  ⑤请假记录：导航下独立 40pt 筛选行 + 浅蓝统计条 + 卡片列表 + 底部 tab；
+//  ⑥筛选底部弹层：上圆角 18 的白面板，字段 44 高、状态 chip 每行 3 个、重置 / 确定。
+//  数值对齐 screen_records.xml / sheet_filter.xml 与 MainActivity.makeRecordCard。
 //
 
 import SwiftUI
@@ -22,25 +23,16 @@ struct RecordsView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
-                NavHeader(titleKey: "nav.record",
-                          title: store["nav.record"],
+                NavHeader(store: store,
+                          titleKey: "nav.record",
                           showsBack: true,
-                          onBack: { dismiss() },
-                          trailing: [.asset(selection.isActive ? Art.filterActive : Art.filterInactive,
-                                            selection.isActive ? Palette.blue : Palette.textLabel),
-                                     .symbol("camera")],
-                          onTrailingTap: { index in
-                              if index == 0 {
-                                  showFilter = true
-                              } else {
-                                  exporter.asking = true
-                              }
-                          })
+                          onBack: { dismiss() })
+
+                filterRow
 
                 ScrollView(showsIndicators: false) {
                     RecordsBody(store: store,
                                 interactive: true,
-                                countText: selection.summary(store),
                                 onOpenDetail: { path.append(.detail) })
                 }
 
@@ -67,6 +59,26 @@ struct RecordsView: View {
         .shotExport(exporter, capture: {
             Shot.render(CaptureRecords(store: store))
         })
+    }
+
+    // 导航下一条独立白底行，漏斗靠右（rc_filter 58×48、marginEnd 6、padding 10）
+    private var filterRow: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Button {
+                showFilter = true
+            } label: {
+                ArtImage(name: selection.isActive ? Art.filterActive : Art.filterInactive,
+                         width: Metrics.filterIconSize, height: Metrics.filterIconSize)
+                    .padding(Metrics.filterIconPad)
+                    .frame(width: Metrics.backBox, height: Metrics.filterRowH)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, Metrics.filterRowEnd)
+        }
+        .frame(height: Metrics.filterRowH)
+        .background(Palette.white)
     }
 }
 
@@ -98,116 +110,118 @@ struct FilterSelection {
 struct RecordsBody: View {
     @ObservedObject var store: TextStore
     var interactive: Bool = true
-    var countText: String? = nil
     var onOpenDetail: () -> Void = {}
 
     private let recordIndexes = [1, 2, 3]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.cardSpacing) {
-            statBar
-
-            HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Palette.blue)
-                    .frame(width: 3, height: 15)
-                EditableText(text: store["rec.sec"], font: Typo.sectionTitle, color: Palette.textPrimary)
-                    .editTap("rec.sec", store["rec.sec"], enabled: interactive)
-                Spacer(minLength: 0)
-                EditableText(text: countText ?? store["rec.status"],
-                             font: .system(size: 12),
-                             color: Palette.textLabel)
-                    .editTap("rec.status", store["rec.status"], enabled: interactive)
-            }
-            .padding(.top, 2)
+        VStack(spacing: 0) {
+            banner
 
             ForEach(recordIndexes, id: \.self) { index in
                 recordCard(index)
+                    .padding(.top, index == recordIndexes.first ? Metrics.cardTopFirst : Metrics.cardTopGap)
             }
-
-            footer
         }
-        .padding(.horizontal, Metrics.cardMargin)
-        .padding(.top, 13)
-        .padding(.bottom, 20)
+        .padding(.horizontal, Metrics.pagePadding)
+        .padding(.top, Metrics.recordsTop)
+        .padding(.bottom, Metrics.pageBottom)
     }
 
-    // 统计条
-    private var statBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "chart.bar.doc.horizontal")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Palette.blue)
-            EditableText(text: store["rec.tip"], font: .system(size: 12), color: Palette.textValue)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .editTap("rec.tip", store["rec.tip"], enabled: interactive)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.blueSoft)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    // 浅蓝统计条：bg_banner #E8F0FE r6、上下 10 / 左右 12、13pt 蓝、居中
+    private var banner: some View {
+        Text(store["rec.tip"])
+            .font(Typo.status)
+            .foregroundStyle(Palette.blue)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Metrics.bannerPadV)
+            .padding(.horizontal, Metrics.bannerPadH)
+            .background(
+                RoundedRectangle(cornerRadius: Metrics.smallRadius, style: .continuous)
+                    .fill(Palette.banner)
+            )
+            .padding(.top, Metrics.bannerTop)
+            .contentShape(Rectangle())
+            .editTap("rec.tip", store["rec.tip"], enabled: interactive)
     }
 
+    // 记录卡：padding 22/18/22/18，标题 15 粗体 + 状态 13，三行信息 13pt 灰，底部头像行
     private func recordCard(_ index: Int) -> some View {
-        let nameKey = "rec\(index).name"
-        let timeKey = "rec\(index).time"
-        let reasonKey = "rec\(index).reason"
-        let durKey = "rec\(index).dur"
-        let statusKey = "rec\(index).status"
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                EditableText(text: store["rec\(index).name"],
+                             font: Typo.recordTitle,
+                             color: Palette.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .editTap("rec\(index).name", store["rec\(index).name"], enabled: interactive)
 
-        return Card(padding: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    EditableText(text: store[nameKey],
-                                 font: .system(size: 15, weight: .semibold),
-                                 color: Palette.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .editTap(nameKey, store[nameKey], enabled: interactive)
-
-                    EditableText(text: store[statusKey],
-                                 font: .system(size: 12, weight: .medium),
-                                 color: store.statusColor(for: statusKey))
-                        .editTap(statusKey, store[statusKey], enabled: interactive)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Palette.textLabel)
-                }
-
-                EditableText(text: store[timeKey], font: .system(size: 12), color: Palette.textLabel)
-                    .editTap(timeKey, store[timeKey], enabled: interactive)
-
-                Divider().overlay(Palette.divider)
-
-                HStack(alignment: .top, spacing: 10) {
-                    EditableText(text: store[reasonKey], font: .system(size: 13), color: Palette.textValue)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .editTap(reasonKey, store[reasonKey], enabled: interactive)
-
-                    EditableText(text: store[durKey], font: .system(size: 12), color: Palette.textLabel)
-                        .editTap(durKey, store[durKey], enabled: interactive)
-                }
+                EditableText(text: store["rec\(index).status"],
+                             font: Typo.status,
+                             color: StatusTone.color(store["rec\(index).status"]))
+                    .editTap("rec\(index).status", store["rec\(index).status"], enabled: interactive)
             }
+
+            infoLine(labelKey: "l.q.start", value: window(index).0, top: Metrics.recInfoTop1)
+            infoLine(labelKey: "l.q.end", value: window(index).1, top: Metrics.recInfoTop2)
+            infoLine(labelKey: "l.q.reason", value: store["rec\(index).reason"], top: Metrics.recInfoTop2)
+
+            HStack(spacing: 0) {
+                AvatarBadge(image: nil, size: Metrics.avatarSmall, glyphSize: Metrics.recordAvatarIcon)
+                EditableText(text: store["rec\(index).name"],
+                             font: Typo.recordName,
+                             color: Palette.textPrimary)
+                    .padding(.leading, 10)
+                    .layoutPriority(1)
+                    .editTap("rec\(index).name", store["rec\(index).name"], enabled: interactive)
+                Spacer(minLength: 8)
+                EditableText(text: store["rec\(index).time"],
+                             font: Typo.status,
+                             color: Palette.textLabel)
+                    .editTap("rec\(index).time", store["rec\(index).time"], enabled: interactive)
+            }
+            .padding(.top, Metrics.recFootTop)
         }
+        .padding(.horizontal, Metrics.recCardPadH)
+        .padding(.vertical, Metrics.recCardPadV)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.white)
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture {
             if interactive { onOpenDetail() }
         }
     }
 
-    private var footer: some View {
-        HStack {
-            Spacer()
-            EditableText(text: store["rec.footer"], font: .system(size: 12), color: Palette.textLabel)
-                .editTap("rec.footer", store["rec.footer"], enabled: interactive)
-            Spacer()
+    // 「2026-11-16 08:40 至 2026-11-16 10:00」→（开始, 结束）
+    private func window(_ index: Int) -> (String, String) {
+        let text = store["rec\(index).time"]
+        let parts = text.components(separatedBy: "至")
+        if parts.count >= 2 {
+            return (parts[0].trimmingCharacters(in: .whitespaces),
+                    parts[1].trimmingCharacters(in: .whitespaces))
         }
-        .padding(.top, 14)
+        return (text, "")
+    }
+
+    private func infoLine(labelKey: String, value: String, top: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            Text(store[labelKey] + "：")
+                .font(Typo.row)
+                .foregroundStyle(Palette.textLabel)
+                .editTap(labelKey, store[labelKey], enabled: interactive)
+            Text(value)
+                .font(Typo.row)
+                .foregroundStyle(Palette.textLabel)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, top)
     }
 }
 
-// MARK: - 筛选底部弹层
+// MARK: - 筛选弹层
 
 struct FilterPanel: View {
     @ObservedObject var store: TextStore
@@ -219,19 +233,22 @@ struct FilterPanel: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            Color.black.opacity(0.35)
+            Palette.shade
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { onClose() }
 
             VStack(spacing: 0) {
                 header
-                Rectangle().fill(Palette.divider).frame(height: 0.5)
+
+                Rectangle()
+                    .fill(Palette.divider)
+                    .frame(height: Metrics.hairline)
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
-                        section("flt.type")
-                        typeChips
+                        section("flt.type", first: true)
+                        typeField
 
                         section("flt.date1")
                         rangeRow(sKey: "flt.d1.s", eKey: "flt.d1.e")
@@ -245,157 +262,186 @@ struct FilterPanel: View {
                         section("flt.status")
                         statusChips
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 12)
+                    .padding(.top, Metrics.filterBodyTop)
+                    .padding(.bottom, Metrics.sheetBodyBottom)
                 }
                 .frame(maxHeight: 520)
 
                 bottomBar
             }
+            .padding(.horizontal, Metrics.pagePadding)
+            .padding(.bottom, Metrics.filterPadBottom)
             .background(Palette.white)
-            .clipShape(TopRoundedShape(radius: 18))
+            .clipShape(TopRoundedShape(radius: Metrics.sheetRadius))
             .ignoresSafeArea(edges: .bottom)
         }
     }
 
+    // 标题 17 居中、✕ 18pt #999 靠右，行高 52
     private var header: some View {
-        HStack {
-            Spacer()
-            EditableText(text: store["flt.title"], font: .system(size: 16, weight: .semibold), color: Palette.textPrimary)
+        ZStack {
+            EditableText(text: store["flt.title"], font: Typo.filterTitle, color: Palette.navTitle)
                 .editTap("flt.title", store["flt.title"])
-            Spacer()
-            Button {
-                onClose()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Palette.textLabel)
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
+
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18))
+                        .foregroundStyle(Palette.textLabel)
+                        .frame(width: Metrics.sheetCloseW, height: Metrics.filterRowHeight)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .frame(height: 52)
+        .frame(height: Metrics.filterRowHeight)
     }
 
-    private func section(_ key: String) -> some View {
-        EditableText(text: store[key], font: .system(size: 13, weight: .medium), color: Palette.textPrimary)
+    private func section(_ key: String, first: Bool = false) -> some View {
+        EditableText(text: store[key], font: Typo.filterSection, color: Palette.textPrimary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .editTap(key, store[key])
-            .padding(.top, 16)
-            .padding(.bottom, 10)
+            .padding(.top, first ? Metrics.sectionPadTop : Metrics.filterSectionTop)
     }
 
-    private var typeChips: some View {
-        HStack(spacing: 10) {
-            ForEach(1...4, id: \.self) { index in
-                chip(key: "flt.type.\(index)",
-                     on: selection.type == index) {
-                    selection.type = index
-                }
-            }
-            Spacer(minLength: 0)
+    // 请假类型：44 高字段 + 行尾 chevron，点一下在三类 / 全部之间切换
+    private var typeField: some View {
+        HStack(spacing: 0) {
+            EditableText(text: store["flt.type.\(selection.type)"],
+                         font: Typo.field,
+                         color: selection.type == 4 ? Palette.textHint : Palette.textValue)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            ChevronRight(color: Palette.chevron)
+        }
+        .padding(.horizontal, Metrics.sheetFieldPadH)
+        .frame(height: Metrics.fieldHeight)
+        .background(
+            RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous)
+                .fill(Palette.fieldBg)
+        )
+        .padding(.top, Metrics.filterFieldTop)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selection.type = selection.type >= 4 ? 1 : selection.type + 1
         }
     }
 
+    // 状态 chip：8 个、每行 3 个（末行不足补位）、高 34、选中蓝底白字
     private var statusChips: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4),
-                  spacing: 10) {
-            ForEach(1...8, id: \.self) { index in
-                chip(key: "flt.s\(index)",
-                     on: selection.statuses.contains(index)) {
-                    if selection.statuses.contains(index) {
-                        selection.statuses.remove(index)
-                    } else {
-                        selection.statuses.insert(index)
+        let rows = [Array(1...3), Array(4...6), Array(7...8)]
+        return VStack(spacing: Metrics.filterChipGap) {
+            ForEach(0..<rows.count, id: \.self) { rowIndex in
+                HStack(spacing: Metrics.filterChipGap) {
+                    ForEach(0..<3, id: \.self) { column in
+                        let items = rows[rowIndex]
+                        if column < items.count {
+                            chip(index: items[column])
+                        } else {
+                            Color.clear.frame(height: Metrics.chipHeight)
+                                .frame(maxWidth: .infinity)
+                        }
                     }
                 }
             }
         }
-        .padding(.bottom, 4)
+        .padding(.top, Metrics.filterChipTop)
     }
 
-    private func chip(key: String, on: Bool, action: @escaping () -> Void) -> some View {
-        Text(store[key])
-            .font(.system(size: 13))
-            .foregroundStyle(on ? Palette.blue : Palette.textValue)
+    private func chip(index: Int) -> some View {
+        let on = selection.statuses.contains(index)
+        return Text(store["flt.s\(index)"])
+            .font(Typo.field)
+            .foregroundStyle(on ? Palette.white : Palette.textValue)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(on ? Palette.blueSoft : Palette.fieldBg)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule().stroke(on ? Palette.blue.opacity(0.45) : Color.clear, lineWidth: 0.8)
+            .frame(maxWidth: .infinity)
+            .frame(height: Metrics.chipHeight)
+            .background(
+                RoundedRectangle(cornerRadius: Metrics.chipRadius, style: .continuous)
+                    .fill(on ? Palette.chipOn : Palette.chipBg)
             )
-            .contentShape(Capsule())
-            .onTapGesture { action() }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if on { selection.statuses.remove(index) }
+                else { selection.statuses.insert(index) }
+            }
             .onLongPressGesture(minimumDuration: 0.45) {
-                editor.begin(key: key, value: store[key])
+                editor.begin(key: "flt.s\(index)", value: store["flt.s\(index)"])
             }
     }
 
-    // 一组日期区间：开始日期 ~ 结束日期
+    // 一组日期区间：两个 44 高字段中间夹「~」
     private func rangeRow(sKey: String, eKey: String) -> some View {
-        HStack(spacing: 10) {
-            dateBox(key: sKey, caption: "flt.from")
+        HStack(spacing: Metrics.filterChipGap) {
+            field(key: sKey, caption: "flt.from")
             Text("~")
-                .font(.system(size: 13))
+                .font(Typo.field)
                 .foregroundStyle(Palette.textLabel)
-            dateBox(key: eKey, caption: "flt.to")
+            field(key: eKey, caption: "flt.to")
         }
+        .padding(.top, Metrics.filterFieldTop)
     }
 
-    private func dateBox(key: String, caption: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            EditableText(text: store[caption], font: .system(size: 10), color: Palette.textLabel)
-                .editTap(caption, store[caption])
-            EditableText(text: store[key], font: .system(size: 13), color: Palette.textValue)
-                .editTap(key, store[key])
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.fieldBg)
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous))
+    private func field(key: String, caption: String) -> some View {
+        EditableText(text: store[key], font: Typo.field, color: Palette.textHint)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Metrics.sheetFieldPadH)
+            .frame(height: Metrics.fieldHeight)
+            .background(
+                RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous)
+                    .fill(Palette.fieldBg)
+            )
+            .editTap(key, store[key])
+            .onLongPressGesture(minimumDuration: 0.45) {
+                editor.begin(key: caption, value: store[caption])
+            }
     }
 
-    // 时长区间：天 / 时 / 分
     private var durRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Metrics.filterChipGap) {
             durBox(key: "flt.dur.d", unitKey: "flt.unit.d")
             durBox(key: "flt.dur.h", unitKey: "flt.unit.h")
             durBox(key: "flt.dur.m", unitKey: "flt.unit.m")
         }
+        .padding(.top, Metrics.filterFieldTop)
     }
 
     private func durBox(key: String, unitKey: String) -> some View {
         HStack(spacing: 4) {
-            EditableText(text: store[key], font: .system(size: 13), color: Palette.textValue)
-                .frame(maxWidth: .infinity, alignment: .center)
+            EditableText(text: store[key], font: Typo.field, color: Palette.textHint)
+                .frame(maxWidth: .infinity, alignment: .trailing)
                 .editTap(key, store[key])
-            EditableText(text: store[unitKey], font: .system(size: 11), color: Palette.textLabel)
+            EditableText(text: store[unitKey], font: Typo.field, color: Palette.textHint)
                 .editTap(unitKey, store[unitKey])
         }
-        .padding(.vertical, 9)
-        .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity)
-        .background(Palette.fieldBg)
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous))
+        .padding(.horizontal, Metrics.sheetFieldPadH)
+        .frame(height: Metrics.fieldHeight)
+        .background(
+            RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous)
+                .fill(Palette.fieldBg)
+        )
     }
 
+    // 重置（描边蓝字）/ 确定（蓝底白字），各占一半、46 高
     private var bottomBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 0) {
             Text(store["flt.reset"])
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Palette.textValue)
+                .font(Typo.sheetButton)
+                .foregroundStyle(Palette.blue)
                 .frame(maxWidth: .infinity)
-                .frame(height: 44)
-                .background(Palette.fieldBg)
-                .clipShape(Capsule())
-                .contentShape(Capsule())
+                .frame(height: Metrics.bigButton)
+                .background(
+                    RoundedRectangle(cornerRadius: Metrics.smallRadius, style: .continuous)
+                        .fill(Palette.white)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Metrics.smallRadius, style: .continuous)
+                        .strokeBorder(Palette.outline, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
                 .onTapGesture {
                     selection = FilterSelection()
                     store.resetFilterFields()
@@ -405,22 +451,22 @@ struct FilterPanel: View {
                 }
 
             Text(store["flt.ok"])
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color.white)
+                .font(Typo.sheetButton)
+                .foregroundStyle(Palette.white)
                 .frame(maxWidth: .infinity)
-                .frame(height: 44)
-                .background(Palette.blue)
-                .clipShape(Capsule())
-                .contentShape(Capsule())
+                .frame(height: Metrics.bigButton)
+                .background(
+                    RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous)
+                        .fill(Palette.blue)
+                )
+                .contentShape(Rectangle())
+                .padding(.leading, Metrics.fwdGap)
                 .onTapGesture { onConfirm() }
                 .onLongPressGesture(minimumDuration: 0.45) {
                     editor.begin(key: "flt.ok", value: store["flt.ok"])
                 }
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 8)
-        .padding(.bottom, 26)
-        .background(Palette.white)
+        .padding(.top, Metrics.filterButtonTop)
     }
 }
 
@@ -431,7 +477,16 @@ struct CaptureRecords: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            NavHeader(titleKey: "nav.record", title: store["nav.record"], showsBack: true)
+            NavHeader(store: store, titleKey: "nav.record", showsBack: true)
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                ArtImage(name: Art.filterInactive, width: 20, height: 20)
+                    .padding(10)
+                    .frame(width: Metrics.backBox, height: 40)
+                    .padding(.trailing, 6)
+            }
+            .frame(height: 40)
+            .background(Palette.white)
             ScrollView(showsIndicators: false) {
                 RecordsBody(store: store, interactive: false)
             }
