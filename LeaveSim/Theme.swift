@@ -94,7 +94,7 @@ enum Typo {
     static let more          = Font.system(size: 14)                     // 列表卡「更多」
     static let moreSmall     = Font.system(size: 12)                     // 详情底栏「更多」
     static let footer        = Font.system(size: 14)                     // 列表尾部
-    static let revokeButton  = Font.system(size: 15)                     // 撤销按钮
+    static let revokeButton  = Font.system(size: 13)                     // 撤销按钮
     static let tabBar        = Font.system(size: 12)                     // 底部 tab 文字
     static let tabBarActive  = Font.system(size: 12, weight: .bold)      // 选中的底部 tab
     static let tabStrip      = Font.system(size: 15)                     // 详情分段 tab
@@ -136,7 +136,7 @@ enum Metrics {
     static let homeTypeIcon: CGFloat     = 44    // ic_join
     static let homeInfoTop: CGFloat      = 12
     static let homeInfoPad: CGFloat      = 3     // 每行信息上下 padding
-    static let homeFootTop: CGFloat      = 28
+    static let homeFootTop: CGFloat      = 10
     static let homeCardPadTop: CGFloat   = 20
     static let homeCardPadBottom: CGFloat = 16
     static let homeWhoTop: CGFloat       = 14
@@ -144,8 +144,8 @@ enum Metrics {
     static let avatarSmall: CGFloat      = 26    // 卡内头像
     static let avatarSmallIcon: CGFloat  = 16
     static let recordAvatarIcon: CGFloat = 14
-    static let revokeHeight: CGFloat     = 40
-    static let revokeMinWidth: CGFloat   = 132
+    static let revokeHeight: CGFloat     = 32
+    static let revokeMinWidth: CGFloat   = 118
 
     static let tabBarRow: CGFloat        = 52    // 底部 tab 行高
     static let tabIcon: CGFloat          = 24
@@ -276,6 +276,8 @@ struct ArtImage: View {
     let name: String
     var width: CGFloat = 24
     var height: CGFloat = 24
+    /// 模板渲染的图标靠这个上色；原色位图（IconJoin）传了也不生效
+    var tint: Color? = nil
 
     var body: some View {
         Image(name)
@@ -283,6 +285,7 @@ struct ArtImage: View {
             .interpolation(.high)
             .scaledToFit()
             .frame(width: width, height: height)
+            .foregroundStyle(tint ?? Color.primary)
             .accessibilityHidden(true)
     }
 }

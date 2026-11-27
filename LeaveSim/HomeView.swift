@@ -17,7 +17,7 @@ struct HomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            NavHeader(store: store, titleKey: "nav.home")
+            NavHeader(store: store, titleKey: "nav.home", showsBack: true)
 
             ScrollView(showsIndicators: false) {
                 HomeBody(store: store,
@@ -104,7 +104,7 @@ struct HomeBody: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .editTap("hd.name", store["hd.name"], enabled: interactive)
 
-                EditableText(text: store["hd.status"], font: Typo.status, color: Palette.green)
+                EditableText(text: store["hd.status"], font: Typo.status, color: StatusTone.color(store["hd.status"]))
                     .editTap("hd.status", store["hd.status"], enabled: interactive)
             }
 
@@ -266,7 +266,8 @@ struct HomeTabBar: View {
                       action: @escaping () -> Void) -> some View {
         let on = selected == tab
         return VStack(spacing: Metrics.tabTextTop) {
-            ArtImage(name: on ? iconOn : iconOff, width: iconSize, height: iconSize)
+            ArtImage(name: on ? iconOn : iconOff, width: iconSize, height: iconSize,
+                     tint: on ? Palette.blue : Palette.textTabIdle)
             EditableText(text: store[textKey],
                          font: on ? Typo.tabBarActive : Typo.tabBar,
                          color: on ? Palette.blue : Palette.textTabIdle)
@@ -286,7 +287,7 @@ struct CaptureHome: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            NavHeader(store: store, titleKey: "nav.home")
+            NavHeader(store: store, titleKey: "nav.home", showsBack: true)
             ScrollView(showsIndicators: false) {
                 HomeBody(store: store, interactive: false)
             }
