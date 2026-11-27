@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "FD0000000000000000000001"
+               BlueprintIdentifier = "FC0000000000000000000002"
                BuildableName = "LeaveSim.app"
                BlueprintName = "LeaveSim"
                ReferencedContainer = "container:LeaveSim.xcodeproj">
@@ -44,7 +44,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "FD0000000000000000000001"
+            BlueprintIdentifier = "FC0000000000000000000002"
             BuildableName = "LeaveSim.app"
             BlueprintName = "LeaveSim"
             ReferencedContainer = "container:LeaveSim.xcodeproj">
@@ -61,7 +61,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "FD0000000000000000000001"
+            BlueprintIdentifier = "FC0000000000000000000002"
             BuildableName = "LeaveSim.app"
             BlueprintName = "LeaveSim"
             ReferencedContainer = "container:LeaveSim.xcodeproj">
