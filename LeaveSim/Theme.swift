@@ -16,6 +16,7 @@ enum Palette {
     // 底色与卡片
     static let pageBg      = Color(hex: 0xF3F7FF)
     static let white       = Color.white
+    static let systemBar   = Color(hex: 0xF9F9F9)   // 底部系统条（真机最底下那条色差）
     static let cardBg      = Color.white
 
     // 文字
@@ -136,7 +137,7 @@ enum Metrics {
     static let homeTypeIcon: CGFloat     = 44    // ic_join
     static let homeInfoTop: CGFloat      = 12
     static let homeInfoPad: CGFloat      = 4.3     // 每行信息上下 padding
-    static let homeFootTop: CGFloat      = 34
+    static let homeFootTop: CGFloat      = 32
     static let homeCardPadTop: CGFloat   = 20
     static let homeCardPadBottom: CGFloat = 16
     static let homeWhoTop: CGFloat       = 16

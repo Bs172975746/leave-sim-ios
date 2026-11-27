@@ -17,8 +17,8 @@ struct HomeView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // 底部安全区那条“色差”：安卓是页面底色，不是纯白
-            Palette.pageBg.ignoresSafeArea(edges: .bottom)
+            // 底部安全区那条“色差”：真机是 #F9F9F9，不是纯白
+            Palette.systemBar.ignoresSafeArea(edges: .bottom)
 
             VStack(spacing: 0) {
                 nav
@@ -266,6 +266,7 @@ struct HomeTabBar: View {
             .frame(height: Metrics.tabBarRow)
         }
         .background(Palette.white)
+        .background(Palette.systemBar.ignoresSafeArea(edges: .bottom))
     }
 
     private func item(tab: HomeTab,
