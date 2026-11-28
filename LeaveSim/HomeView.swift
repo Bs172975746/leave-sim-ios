@@ -165,7 +165,7 @@ struct HomeBody: View {
     /// 安卓卡里是单行整句「开始时间：2026-11-16 08:40」。
     private func infoLine(labelKey: String, valueKey: String) -> some View {
         // 原版列表卡里「开始时间：xxx」整行都是浅灰，值是 #919191、标签 #999999
-        (Text(store[labelKey] + "：").foregroundColor(Palette.textLabel)
+        (Text(store[labelKey] + "：").foregroundColor(Palette.listValue)
             + Text(store[valueKey]).foregroundColor(Palette.listValue))
             .font(Typo.row)
             .lineSpacing(2)
@@ -190,12 +190,12 @@ struct HomeBody: View {
             .font(Typo.revokeButton)
             .foregroundStyle(Palette.textPrimary)
             .lineLimit(1)
-            .padding(.horizontal, 14)
-            .frame(minWidth: Metrics.revokeMinWidth, minHeight: Metrics.revokeHeight)
+            .padding(.horizontal, Metrics.revokePadH)
+            .frame(minHeight: Metrics.revokeHeight)
             .background(Palette.white)
-            .clipShape(RoundedRectangle(cornerRadius: Metrics.smallRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Metrics.revokeRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: Metrics.smallRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: Metrics.revokeRadius, style: .continuous)
                     .strokeBorder(Palette.fwdBorder, lineWidth: 1)
             )
             .contentShape(Rectangle())
@@ -280,9 +280,9 @@ struct HomeTabBar: View {
                       textKey: String,
                       action: @escaping () -> Void) -> some View {
         let on = selected == tab
-        return VStack(spacing: Metrics.tabTextTop) {
+        return VStack(spacing: Metrics.tabIconTextGap) {
             ArtImage(name: on ? iconOn : iconOff, width: iconSize, height: iconSize,
-                     tint: on ? Palette.blue : Palette.textTabIdle)
+                     tint: on ? Palette.blue : Palette.tabIconIdle)
             EditableText(text: store[textKey],
                          font: on ? Typo.tabBarActive : Typo.tabBar,
                          color: on ? Palette.blue : Palette.textTabIdle)

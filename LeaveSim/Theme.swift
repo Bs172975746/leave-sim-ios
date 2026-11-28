@@ -22,11 +22,12 @@ enum Palette {
 
     // 文字
     static let navTitle    = Color(hex: 0x000000)   // 导航标题：纯黑
-    static let textPrimary = Color(hex: 0x24262A)   // text_primary
-    static let textValue   = Color(hex: 0x33363B)   // text_value
-    static let listValue   = Color(hex: 0x919191)   // 列表卡里「开始时间：xxx」的值（原版取样）
-    static let textLabel   = Color(hex: 0x999999)   // text_label
-    static let textTabIdle = Color(hex: 0x82868C)   // text_tab_idle
+    static let textPrimary = Color(hex: 0x222222)   // text_primary
+    static let textValue   = Color(hex: 0x222222)   // text_value
+    static let listValue   = Color(hex: 0x8C8C8C)   // 列表卡里「开始时间：xxx」的值（原版取样）
+    static let textLabel   = Color(hex: 0x8C8C8C)   // text_label
+    static let textTabIdle = Color(hex: 0x888888)
+    static let tabIconIdle = Color(hex: 0x252525)   // 未选中 tab 图标是深色（原版实测）   // text_tab_idle
     static let textHint    = Color(hex: 0x9AA0A6)   // text_hint
     static let moreText    = Color(hex: 0x4A4F57)   // 详情底栏「更多」
     static let footerText  = Color(hex: 0x8A8F94)   // 列表尾部「没有更多数据了~」
@@ -50,7 +51,7 @@ enum Palette {
     // 描边 / 分割
     static let divider     = Color(hex: 0xEEEEEE)
     static let outline     = Color(hex: 0xDCE0E8)   // bg_btn_outline 描边
-    static let fwdBorder   = Color(hex: 0xDFE3EA)   // bg_fwd 描边
+    static let fwdBorder   = Color(hex: 0xCBCBCB)   // bg_fwd 描边
     static let dashed      = Color(hex: 0xC9CDD6)   // bg_dashed 虚线
     static let chevron     = Color(hex: 0xC2C6CE)   // ic_chevron_right
     static let chevronDown = Color(hex: 0x9AA0AA)   // ic_chevron
@@ -97,9 +98,9 @@ enum Typo {
     static let more          = Font.system(size: 14)                     // 列表卡「更多」
     static let moreSmall     = Font.system(size: 12)                     // 详情底栏「更多」
     static let footer        = Font.system(size: 14)                     // 列表尾部
-    static let revokeButton  = Font.system(size: 13)                     // 撤销按钮
-    static let tabBar        = Font.system(size: 12)                     // 底部 tab 文字
-    static let tabBarActive  = Font.system(size: 12, weight: .bold)      // 选中的底部 tab
+    static let revokeButton  = Font.system(size: 15)                     // 撤销按钮
+    static let tabBar        = Font.system(size: 13)                     // 底部 tab 文字
+    static let tabBarActive  = Font.system(size: 13, weight: .bold)      // 选中的底部 tab
     static let tabStrip      = Font.system(size: 15)                     // 详情分段 tab
     static let tabStripBold  = Font.system(size: 15, weight: .bold)      // 选中的详情分段 tab
     static let rule          = Font.system(size: 10)                     // 竖排「请假规则」
@@ -119,13 +120,14 @@ enum Typo {
 // MARK: - 尺寸
 
 enum Metrics {
-    static let navHeight: CGFloat        = 48    // 导航条
+    static let navHeight: CGFloat        = 37.8   // 原版导航栏下边界 99.5dp（含状态栏）    // 导航条
     static let backBox: CGFloat          = 58    // 返回热区（58×48，图标居中）
     static let pagePadding: CGFloat      = 22    // 页面左右留白 / 卡片内边距
-    static let cardRadius: CGFloat       = 12    // bg_card
+    static let cardRadius: CGFloat       = 8    // bg_card
     static let cardGap: CGFloat          = 13    // 卡与卡之间的间隔
     static let fieldRadius: CGFloat      = 10    // bg_field / 提交按钮
     static let smallRadius: CGFloat      = 6     // 表格按钮 / 虚线框
+    static let revokeRadius: CGFloat     = 3     // 撤销按钮圆角（原版 ≈3dp）
     static let chipRadius: CGFloat       = 4     // bg_chip
     static let ruleRadius: CGFloat       = 4     // bg_rules 右侧圆角
     static let sheetRadius: CGFloat      = 18    // bg_sheet
@@ -134,27 +136,28 @@ enum Metrics {
     static let homeCardTop: CGFloat      = 19.2    // 进行中卡
     static let homeSection2Top: CGFloat  = 17.8    // 「发起」
     static let homeTypeFirstTop: CGFloat = 25    // 第一张发起卡
-    static let homeTypeGap: CGFloat      = 15    // 发起卡之间
-    static let homeTypeHeight: CGFloat   = 64    // 发起卡高度
+    static let homeTypeGap: CGFloat      = 13.5    // 发起卡之间
+    static let homeTypeHeight: CGFloat   = 66    // 发起卡高度
     static let homeTypeIcon: CGFloat     = 44    // ic_join
     static let homeInfoTop: CGFloat      = 11.1
     static let homeInfoPad: CGFloat      = 4.0     // 每行信息上下 padding
     static let homeFootTop: CGFloat      = 34
     static let homeCardPadTop: CGFloat   = 18.4
-    static let homeCardPadBottom: CGFloat = 15.8
+    static let homeCardPadBottom: CGFloat = 11.6
     static let homeWhoTop: CGFloat       = 16
     static let homeMoreTop: CGFloat      = 11
     static let avatarSmall: CGFloat      = 26    // 卡内头像
     static let avatarSmallIcon: CGFloat  = 16
     static let recordAvatarIcon: CGFloat = 14
     static let revokeHeight: CGFloat     = 32
-    static let revokeMinWidth: CGFloat   = 118
+    static let revokePadH: CGFloat       = 23.5   // 撤销按钮文字左右内边距（原版 137dp 宽）
 
-    static let tabBarRow: CGFloat        = 52
+    static let tabBarRow: CGFloat        = 54
     static let bottomBand: CGFloat       = 35    // 底部 #F9F9F9 色带（真机 34.8dp）
     static let tabIcon: CGFloat          = 24
     static let tabIconRecord: CGFloat    = 22
     static let tabTextTop: CGFloat       = 2
+    static let tabIconTextGap: CGFloat   = 5.5   // 图标与文字间距（原版 5.5dp）
     static let hairline: CGFloat         = 0.5
 
     static let stripHeight: CGFloat      = 46    // 详情分段 tab
